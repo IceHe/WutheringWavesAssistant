@@ -3,12 +3,16 @@ from .BaseChar import BaseChar, SwitchPriority
 
 
 class Mornye(BaseChar):
+    FIELD_TIME = 10.0
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.last_heavy = 0
         self.echo_lit_on_air = False
 
     def do_perform(self):
+        started = time.monotonic()
+        deadline = started + self.FIELD_TIME
         if self.has_intro:
             self.continues_normal_attack(1.33)
         self.check_f_on_switch = True
@@ -23,64 +27,79 @@ class Mornye(BaseChar):
                 else:
                     self.continues_normal_attack(0.1)
                     return self.switch_next_char()
-            self.not_on_air_actions()
+            self.not_on_air_actions(deadline)
 
-        if self.on_air():
-            self.on_air_actions()
+        if time.monotonic() < deadline and self.on_air():
+            self.on_air_actions(deadline)
+        elapsed = time.monotonic() - started
+        if elapsed >= self.FIELD_TIME:
+            self.logger.info("Mornye field time reached %.1fs, switching out", elapsed)
         self.switch_next_char()
 
     def on_air(self):
         return self.has_long_action2()
 
-    def on_air_actions(self):
+    def on_air_actions(self, deadline):
         self.echo_lit_on_air = False
         self.logger.debug("on_air start attacking")
-        start = time.time()
-        while (
-                time.time() - start < 10
-                and self.on_air()
-        ):
+        heavy_attempts = 0
+        heavy_confirmed = False
+        while time.monotonic() < deadline and self.on_air():
             if self.detect_elbow_strike():
                 self.logger.debug("Detected an elbow strike, attempting to reset.")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
                 self.task.wait_until(lambda: not self.detect_elbow_strike(),
-                                     post_action=lambda: self.continues_right_click(0.05), time_out=1.5)
+                                     post_action=lambda: self.continues_right_click(0.05),
+                                     time_out=min(1.5, remaining))
+            if time.monotonic() >= deadline:
+                break
             self.click_liberation()
+            if time.monotonic() >= deadline:
+                break
             if self.on_air() and self.is_mouse_forte_full():
                 self.logger.debug("mouse forte full, heavy attack")
+                heavy_attempts += 1
                 if self.heavy_click_forte(
                         check_fun=lambda: self.is_mouse_forte_full() and not self.detect_elbow_strike()):
                     if self.detect_elbow_strike():
                         continue
+                    heavy_confirmed = True
                     # 协奏未满则先普攻补满（最多 2s），仍不满再放声骸
-                    if not self.task.wait_until(lambda: self.is_con_full(), time_out=1.5):
-                        fill_start = time.time()
-                        while not self.is_con_full() and time.time() - fill_start < 2 and self.on_air():
+                    remaining = deadline - time.monotonic()
+                    if remaining > 0 and not self.task.wait_until(self.is_con_full, time_out=min(1.5, remaining)):
+                        fill_deadline = min(deadline, time.monotonic() + 2)
+                        while time.monotonic() < fill_deadline and not self.is_con_full() and self.on_air():
                             self.continues_normal_attack(0.5)
                             if self.detect_elbow_strike():
                                 break
-                        if not self.is_con_full():
+                        if time.monotonic() < deadline and not self.is_con_full():
                             self.click_echo(duration=0.2)
                     self.last_heavy = time.time()
                     self.check_f_on_switch = False
                     break
+            if time.monotonic() >= deadline:
+                break
             self.click_resonance()
             self.click()
             self.sleep(0.01)
         self.logger.debug("finished attacking on_air")
+        if heavy_attempts and not heavy_confirmed:
+            self.logger.info("Mornye aerial heavy attack was not confirmed after %d attempt(s)", heavy_attempts)
 
-    def not_on_air_actions(self):
+    def not_on_air_actions(self, deadline):
         self.logger.debug("not on_air start attacking")
-        start = time.time()
-        try_douge = True
-        while time.time() - start < 10 and not self.on_air():
+        try_dodge = True
+        while time.monotonic() < deadline and not self.on_air():
             self.click()
             self.click_resonance()
             self.check_combat()
             self.sleep(0.1)
-            if self.is_mouse_forte_full():
-                if try_douge:
+            if time.monotonic() < deadline and self.is_mouse_forte_full():
+                if try_dodge:
                     self.task.click(key="right")
-                    try_douge = False
+                    try_dodge = False
                 self.heavy_attack()
                 self.sleep(0.3)
 
@@ -100,7 +119,11 @@ class Mornye(BaseChar):
 
     def detect_elbow_strike(self):
         # 声骸图标在空中亮过再变暗才算被击飞，起飞过渡中或空中不能放的声骸图标本来就是暗的
-        if self.available('echo', check_color=True):
+        echo_lit = self.task.box_highlighted('echo')
+        if (echo_lit or self.echo_lit_on_air) and self.has_cd('echo'):
+            self.echo_lit_on_air = False
+            return False
+        if echo_lit:
             self.echo_lit_on_air = True
             return False
         return self.echo_lit_on_air
