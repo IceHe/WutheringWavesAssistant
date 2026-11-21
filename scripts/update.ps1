@@ -67,6 +67,20 @@ try {
     }
 
     $branch = Invoke-Git symbolic-ref --quiet --short HEAD
+    if ($branch -eq 'okww-fight') {
+        $forkRef = 'refs/heads/okww-fight'
+        $forkHead = ''
+        $forkUrl = Invoke-Git remote get-url --push fork
+        if (Invoke-Git ls-remote --refs $forkUrl $forkRef) {
+            Invoke-Git fetch --no-tags $forkUrl $forkRef
+            $forkHead = Invoke-Git rev-parse --verify 'FETCH_HEAD^{commit}'
+            & $git merge-base --is-ancestor $forkHead HEAD
+            if ($LASTEXITCODE -ne 0) {
+                throw 'The fork branch has commits missing locally. Reconcile fork/okww-fight before updating.'
+            }
+        }
+    }
+
     $remote = @{
         '0' = 'origin'
         '1' = 'https://github.com/wakening/WutheringWavesAssistant.git'
@@ -121,6 +135,11 @@ try {
         }
     } else {
         throw 'Could not compare the current branch with upstream main.'
+    }
+
+    if ($branch -eq 'okww-fight') {
+        Write-Host 'Pushing committed changes to fork/okww-fight...'
+        Invoke-Git push "--force-with-lease=${forkRef}:${forkHead}" fork "HEAD:$forkRef"
     }
 
     Write-Host "WWA update completed on $branch."

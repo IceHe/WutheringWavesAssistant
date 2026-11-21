@@ -111,7 +111,9 @@ python main.py
 
 在 WWA 中选择「重启更新」，或在 Git 工作目录中运行 `WWA一键更新.bat`。两者共用同一个更新流程。`main` 仅做快进更新，`okww-fight` 等开发分支会把本地提交变基到上游 `main`。更新前会暂存已修改和未跟踪的文件，更新后恢复文件和暂存区状态。
 
-变基冲突时，更新器会撤销本次变基。恢复本地改动发生冲突时，更新器会保留对应的 stash 并显示其编号，方便根据 `git status` 处理。Git 更新完成后会重新打开 WWA。只想更新代码时，可执行 `powershell -NoProfile -File scripts/update.ps1 -NoRestart`。
+`okww-fight` 更新成功后会把已提交的内容推送到 `fork/okww-fight`。推送要求远程分支在更新期间保持在已检查的提交上，本地暂存区和未提交文件不会进入推送。
+
+变基冲突时，更新器会撤销本次变基。恢复本地改动发生冲突时，更新器会保留对应的 stash 并显示其编号，方便根据 `git status` 处理。更新流程成功后会重新打开 WWA。只想运行更新流程时，可执行 `powershell -NoProfile -File scripts/update.ps1 -NoRestart`。
 
 ### 9️⃣ 管理环境
 
