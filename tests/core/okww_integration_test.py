@@ -10,6 +10,7 @@ from src.config.config import CombatBackend, Config
 from src.core.combat.backend import combat_backend, create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.combat.okww.backend import OKWWCombatSystem
+from src.core.runtime import RuntimeConfig
 from src.core.workflow import TaskSpec
 from src.service.combat_service import CombatServiceImpl
 
@@ -36,12 +37,14 @@ class CombatSelectionTest(unittest.TestCase):
                     _container=Mock(window_service=lambda: window),
                     _combat_task_event=event,
                 )
+                context.spec.user_config["Controls"]["ResonanceSkill"] = "K"
                 if node_context:
-                    context.runtime = SimpleNamespace(stop_event=event)
+                    context.runtime = SimpleNamespace(stop_event=event, cfg=RuntimeConfig(context.spec.user_config))
                 service = CombatServiceImpl(context, window, Mock(), Mock(), Mock())
                 combat = service.combat_system()
                 self.assertIsInstance(combat, OKWWCombatSystem)
                 self.assertIs(combat._task_event, event)
+                self.assertEqual(combat._runtime._input._controls.resonanceSkill, "K")
 
     def test_cli_and_gui_submission_share_the_task_snapshot(self):
         from src import application

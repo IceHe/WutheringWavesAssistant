@@ -48,10 +48,9 @@ class CombatRuntime(Rotation, Vision, CombatInput):
     debug = False
     name = "WWA OKWW Combat"
 
-    def __init__(self, control, images, window, ocr, checkpoint, *, open_world=False):
-        self.control = control
+    def __init__(self, inputs, images, ocr, checkpoint, *, open_world=False):
+        self._input = inputs
         self.images = images
-        self.window = window
         self._ocr = ocr
         self._checkpoint = checkpoint
         self._open_world = open_world
@@ -59,12 +58,10 @@ class CombatRuntime(Rotation, Vision, CombatInput):
         self._last_frame = 0.0
         self._last_input = 0.0
         self._last_pickup = 0.0
-        self._pressed_keys = set()
-        self._pressed_buttons = set()
         self.auto_pickup = False
         self.check_boss_hp = True
         self.logger = logger
-        # WWA's control service maps logical keys to the in-game bindings.
+        # The input adapter maps logical keys to WWA's configured game bindings.
         self.key_config = {"Resonance Key": "E", "Echo Key": "Q", "Liberation Key": "R", "Tool Key": "T"}
         self.char_config = {"Iuno C6": False, "Roccia C6": False, "Chisa DPS": False, "Suoming DPS": False}
         self.con_full_size = {}
@@ -184,19 +181,6 @@ class CombatRuntime(Rotation, Vision, CombatInput):
 
     def is_open_world_auto_combat(self):
         return self._open_world
-
-    def get_target_names(self):
-        suffix = "_169" if self.screen_width == 1600 else ""
-        return "has_target" + suffix, "no_target" + suffix
-
-    def has_target(self):
-        target, no_target = self.get_target_names()
-        regions = (self.get_box_by_name(target).scale(1.2), "box_target_enemy_long",
-                   "target_box_long2", "target_box_short")
-        for region in regions:
-            if match := self.find_best_match_in_box(region, (target, no_target), threshold=0.6):
-                return match.name == target
-        return False
 
     def check_combat(self, fresh=True):
         self._checkpoint()

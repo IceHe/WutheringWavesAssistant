@@ -27,9 +27,10 @@ def create_combat_system(context, control, images, *, open_world=False):
         ocr = context._container.ocr_service
         if runtime is not None:
             task_event = runtime.stop_event
+            config = runtime.cfg
         else:
             # The older page-event flow has no RuntimeConfig in its Context.
-            # Reuse Win32ControlService with the same snapshot as node workflows.
+            # Use its task snapshot for combat bindings and WWA's special-state actions.
             from src.core.runtime import RuntimeConfig
             from src.core.workflow import NodeContext, RuntimeContext
             from src.service.control_service import Win32ControlServiceImpl
@@ -38,7 +39,8 @@ def create_combat_system(context, control, images, *, open_world=False):
             config = RuntimeConfig(context.spec.user_config)
             input_context = NodeContext(runtime=RuntimeContext(cfg=config, stop_event=task_event))
             control = Win32ControlServiceImpl(input_context, window)
-        return OKWWCombatSystem(control, images, window, ocr, task_event, open_world=open_world)
+        return OKWWCombatSystem(control, images, window, ocr, task_event,
+                                controls=config.controls, open_world=open_world)
     except Exception:
         logger.exception("Could not initialize OKWW character combat")
         raise

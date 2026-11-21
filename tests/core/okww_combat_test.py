@@ -2,17 +2,23 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import cv2
 import numpy as np
+import win32api
+import win32con
 
+from src.config.config import ControlsConfig
 from src.core.combat.okww.backend import OKWWCombatSystem
 from src.core.combat.okww.characters.BaseChar import BaseChar, Elements, SwitchPriority
+from src.core.combat.okww.post_message import PostMessageCombatInput
 from src.core.combat.okww.registry import char_dict
 from src.core.combat.okww.rotation import NotInCombatException, con_colors
 from src.core.combat.okww.runtime import CombatRuntime
 from src.core.combat.okww.vision import template_index
+from src.core.exceptions import StopError
+from src.core.runtime import ControlsRuntimeConfig
 
 FRAMES = Path(__file__).with_name("okww_frames")
 
@@ -23,7 +29,7 @@ def replay(name="in_combat"):
 
 
 def runtime_for(frame):
-    runtime = CombatRuntime(None, None, None, None, lambda: None)
+    runtime = CombatRuntime(None, None, None, lambda: None)
     runtime.frame = frame
     return runtime
 
@@ -126,13 +132,70 @@ class RotationTest(unittest.TestCase):
         self.assertFalse(self.sub.is_current_char)
 
 
+class PostMessageInputTest(unittest.TestCase):
+    def setUp(self):
+        self.window = SimpleNamespace(window=42)
+        controls = ControlsRuntimeConfig(ControlsConfig(teamMember2="K"))
+        self.inputs = PostMessageCombatInput(self.window, controls)
+        post = patch("src.core.combat.okww.post_message.win32gui.PostMessage")
+        self.post = post.start()
+        self.addCleanup(post.stop)
+
+    def test_mapped_switch_key_has_scan_code_and_matching_release(self):
+        self.inputs.key_down("2")
+        self.window.window = 43
+        self.inputs.key_up("2")
+        vk = ord("K")
+        params = (win32api.MapVirtualKey(vk, 0) << 16) | 1
+        self.assertEqual(self.post.call_args_list, [
+            call(42, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0),
+            call(42, win32con.WM_KEYDOWN, vk, params),
+            call(42, win32con.WM_KEYUP, vk, params | (3 << 30)),
+        ])
+
+    def test_click_moves_then_waits_before_pressing_and_releases_on_stop(self):
+        sequence = Mock()
+        sequence.attach_mock(self.post, "post")
+        wait = Mock(side_effect=[None, StopError()])
+        sequence.attach_mock(wait, "wait")
+        pos = win32api.MAKELONG(640, 360)
+        with self.assertRaises(StopError):
+            self.inputs.click("middle", 0.02, wait, position=(640, 360))
+        self.assertEqual(sequence.mock_calls, [
+            call.post(42, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0),
+            call.post(42, win32con.WM_MOUSEMOVE, 0, pos),
+            call.wait(0.02),
+            call.post(42, win32con.WM_MBUTTONDOWN, win32con.MK_MBUTTON, pos),
+            call.wait(0.02),
+            call.post(42, win32con.WM_MBUTTONUP, 0, pos),
+        ])
+
+    def test_stop_during_click_lead_in_skips_button_down(self):
+        with self.assertRaises(StopError):
+            self.inputs.click("left", 0.02, Mock(side_effect=StopError()))
+        self.assertEqual([args[1] for args, _ in self.post.call_args_list],
+                         [win32con.WM_ACTIVATE, win32con.WM_MOUSEMOVE])
+
+    def test_heavy_attack_keeps_original_coordinates_even_after_another_click(self):
+        self.inputs.click("middle", 0.01, Mock(), position=(640, 360))
+        self.post.reset_mock()
+        self.inputs.mouse_down("left")
+        self.inputs.click("middle", 0.01, Mock(), position=(100, 200))
+        self.window.window = 43
+        self.inputs.release_inputs()
+        pos = win32api.MAKELONG(640, 360)
+        self.post.assert_any_call(42, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, pos)
+        self.post.assert_called_with(42, win32con.WM_LBUTTONUP, 0, pos)
+
+
 class CombatLifecycleTest(unittest.TestCase):
-    def test_extension_timeout_and_cancel_release_inputs(self):
+    @patch("src.core.combat.okww.post_message.win32gui.PostMessage")
+    def test_extension_timeout_and_cancel_release_inputs(self, post):
         control = Mock()
         owner = threading.Event()
         owner.set()
         started = threading.Event()
-        backend = OKWWCombatSystem(control, Mock(screenshot=replay), None, None, owner)
+        backend = OKWWCombatSystem(control, Mock(screenshot=replay), SimpleNamespace(window=42), None, owner)
         backend.is_async = True
         backend.check_boss_hp = False
 
@@ -151,18 +214,21 @@ class CombatLifecycleTest(unittest.TestCase):
                 self.assertIs(backend._thread, worker)
                 worker.join(1)
                 self.assertTrue(backend.is_paused)
-                control.key_up.assert_called_with("E")
-                control.mouse_left_up.assert_called_once()
+                params = (win32api.MapVirtualKey(ord("E"), 0) << 16) | 1 | (3 << 30)
+                post.assert_any_call(42, win32con.WM_KEYUP, ord("E"), params)
+                post.assert_any_call(42, win32con.WM_LBUTTONUP, 0, 0)
+                post.assert_any_call(42, win32con.WM_MBUTTONUP, 0, 0)
 
-                control.reset_mock()
+                post.reset_mock()
                 started.clear()
                 backend.start(2)
                 self.assertTrue(started.wait(2.0))
                 owner.clear()
                 backend.stop(join=True)
                 self.assertTrue(backend.is_paused)
-                control.key_up.assert_called_with("E")
-                control.mouse_left_up.assert_called_once()
+                post.assert_any_call(42, win32con.WM_KEYUP, ord("E"), params)
+                post.assert_any_call(42, win32con.WM_LBUTTONUP, 0, 0)
+                self.assertEqual(control.mock_calls, [])
             finally:
                 backend.stop(join=True)
 

@@ -8,6 +8,7 @@ from src.core.combat.combat_core import BaseResonator
 from src.core.combat.combat_system import CombatSystem
 from src.core.exceptions import StopError
 
+from .post_message import PostMessageCombatInput
 from .rotation import NotInCombatException
 from .runtime import CombatRuntime
 from .vision import template_index
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class OKWWCombatSystem:
-    def __init__(self, control, images, window, ocr, task_event, *, open_world=False):
+    def __init__(self, control, images, window, ocr, task_event, *, controls=None, open_world=False):
         template_index()
         self.control_service = control
         self.img_service = images
@@ -33,14 +34,20 @@ class OKWWCombatSystem:
         self._generation = 0
         self._running_generation = 0
         self._deadline = None
+        self._reset_camera = True
         self._idle = threading.Event()
         self._idle.set()
-        self._runtime = CombatRuntime(control, images, window, ocr, self._checkpoint, open_world=open_world)
+        inputs = PostMessageCombatInput(window, controls)
+        self._runtime = CombatRuntime(inputs, images, ocr, self._checkpoint, open_world=open_world)
         self._special_states = None
 
     @property
     def is_paused(self):
         return self._idle.is_set()
+
+    @property
+    def combat_check_suspended(self):
+        return self._runtime.in_liberation or self._runtime.skip_combat_check
 
     def set_resonators(self, resonator_names_zh, is_print=True):
         hints = tuple(name if name and name.casefold() != "none" else None for name in resonator_names_zh)
@@ -52,7 +59,7 @@ class OKWWCombatSystem:
         if is_print:
             logger.info("OKWW team hints: %s", hints)
 
-    def start(self, delay_seconds=0.0):
+    def start(self, delay_seconds=0.0, *, reset_camera=True):
         with self._lock:
             if self._task_event is not None and not self._task_event.is_set():
                 return
@@ -60,6 +67,7 @@ class OKWWCombatSystem:
             if not self._active or (self._deadline is not None and now >= self._deadline):
                 self._active = True
                 self._generation += 1
+                self._reset_camera = reset_camera
             self._deadline = now + delay_seconds if delay_seconds > 0 else None
             if self._thread is not None:
                 return
@@ -103,6 +111,7 @@ class OKWWCombatSystem:
                 generation = self._generation
                 self._running_generation = generation
                 hints = self.resonators or ()
+                reset_camera = self._reset_camera
             try:
                 runtime.reset_session()
                 runtime.hints = hints
@@ -117,7 +126,8 @@ class OKWWCombatSystem:
                     runtime.check_combat(fresh=False)
                     if not armed:
                         self._checkpoint()
-                        self.control_service.camera_reset()
+                        if reset_camera:
+                            runtime.click(key="middle")
                         armed = True
                     runtime.get_current_char().perform()
                     runtime.release_inputs()

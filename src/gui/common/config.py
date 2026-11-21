@@ -196,6 +196,7 @@ class ParamConfig(QConfig):
 
     # Explore
     exploreAutoCombat = ConfigItem("Explore", "AutoCombat", False, BoolValidator())
+    exploreAutoCombatOnEngage = ConfigItem("Explore", "AutoCombatOnEngage", False, BoolValidator())
     exploreAutoPickup = ConfigItem("Explore", "AutoPickup", False, BoolValidator())
     exploreSkipStory = ConfigItem("Explore", "SkipStory", False, BoolValidator())
     exploreAutoDialogue = ConfigItem("Explore", "AutoDialogue", False, BoolValidator())

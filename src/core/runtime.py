@@ -219,6 +219,7 @@ class ExploreRuntimeConfig:
     def __init__(self, cfg: ExploreConfig):
         self._cfg: ExploreConfig = cfg
         self.autoCombat: bool = bool(cfg.autoCombat)
+        self.autoCombatOnEngage: bool = self.autoCombat and cfg.autoCombatOnEngage
         self.autoPickup: bool = bool(cfg.autoPickup)
         self.skipStory: bool = bool(cfg.skipStory)
         self.autoDialogue: bool = bool(cfg.autoDialogue)

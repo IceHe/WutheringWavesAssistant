@@ -60,6 +60,9 @@ class StoryExploreWidget(QWidget):
         self.mainLayout = QVBoxLayout(self)
 
         self.autoCombatCheckBox = CheckBox(self.tr("Auto Combat:"), self)
+        self.autoCombatOnEngageCheckBox = CheckBox(self.tr("Start automatically in combat"), self)
+        self.autoCombatOnEngageCheckBox.setToolTip(
+            self.tr("A hotkey or ESC stops auto combat until the next fight."))
         self.autoCombatDescLabels = [
             QLabel(self.tr(r'Hotkeys: Mouse [Side Button 1], [Side Button 2], Keyboard [5 (above R)], or [`~]. Choose any one of the four options; you do not need to press them all.'), self, wordWrap=True),
             QLabel(self.tr(r'Usage: Start the script and return to the game. Press the assigned hotkey to start auto combat. Press the hotkey again or ESC to stop.'), self, wordWrap=True),
@@ -67,6 +70,7 @@ class StoryExploreWidget(QWidget):
             QLabel(self.tr(r"Note: When pressing the hotkey, make sure the character portraits on the right side of the screen are visible. Otherwise, the script won't be able to detect your characters or switch between them."), self, wordWrap=True),
         ]
         self.autoCombatLayout = QVBoxLayout()
+        self.autoCombatLayout.addWidget(self.autoCombatOnEngageCheckBox)
         for label in self.autoCombatDescLabels:
             self.autoCombatLayout.addWidget(label)
         self.autoCombatLayout.setSpacing(2)
@@ -123,6 +127,9 @@ class StoryExploreWidget(QWidget):
 
         self.autoCombatCheckBox.toggled.connect(
             lambda checked: paramConfig.set(paramConfig.exploreAutoCombat, checked))
+        self.autoCombatCheckBox.toggled.connect(self.autoCombatOnEngageCheckBox.setEnabled)
+        self.autoCombatOnEngageCheckBox.toggled.connect(
+            lambda checked: paramConfig.set(paramConfig.exploreAutoCombatOnEngage, checked))
         self.autoPickupCheckBox.toggled.connect(
             lambda checked: paramConfig.set(paramConfig.exploreAutoPickup, checked))
         self.skipStoryCheckBox.toggled.connect(
@@ -140,6 +147,8 @@ class StoryExploreWidget(QWidget):
 
     def __loadConfig(self):
         self.autoCombatCheckBox.setChecked(paramConfig.get(paramConfig.exploreAutoCombat))
+        self.autoCombatOnEngageCheckBox.setChecked(paramConfig.get(paramConfig.exploreAutoCombatOnEngage))
+        self.autoCombatOnEngageCheckBox.setEnabled(self.autoCombatCheckBox.isChecked())
         self.autoPickupCheckBox.setChecked(paramConfig.get(paramConfig.exploreAutoPickup))
         self.skipStoryCheckBox.setChecked(paramConfig.get(paramConfig.exploreSkipStory))
         self.autoDialogueCheckBox.setChecked(paramConfig.get(paramConfig.exploreAutoDialogue))

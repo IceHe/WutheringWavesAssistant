@@ -148,7 +148,7 @@ class CombatSystem:
         is_toggle_failed = False
         last_time = None
 
-        while True:
+        while event is self.event:
             # 暂停
             # logger.debug("member: %s", index + 1)
             self.is_paused = True
@@ -227,11 +227,11 @@ class CombatSystem:
             next_index = 0
         return next_index
 
-    def start(self, delay_seconds: float = 0.0):
+    def start(self, delay_seconds: float = 0.0, *, reset_camera: bool = True):
         if self.is_async:
             with self._lock:
                 # logger.info("Combat system started.")
-                if not self.event.is_set():
+                if reset_camera and not self.event.is_set():
                     self.control_service.camera_reset()
                 self.event.set()
                 if delay_seconds > 0.0:
@@ -250,10 +250,11 @@ class CombatSystem:
     def stop(self, join: bool = False):
         with self._lock:
             self.event.clear()
+            self.event = threading.Event()
             t = self._thread
             if self.is_async:
                 self._thread = None
-            if not join:
+            if not join or t is None or t is threading.current_thread():
                 return
             deadline = time.monotonic() + 3
             while time.monotonic() < deadline:

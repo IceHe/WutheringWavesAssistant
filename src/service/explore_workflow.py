@@ -9,8 +9,10 @@ from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import win32con
 
+from src.config.config import CombatBackend
 from src.core.color import ColorRule, Color, RuleMode
-from src.core.combat.backend import create_combat_system
+from src.core.combat.backend import combat_backend, create_combat_system
+from src.core.combat.okww.post_message import PostMessageCombatInput
 from src.core.exceptions import StopError
 from src.core.geometry import AnchorBBox, Align, AnchorPoint, Scaler
 from src.core.i18n import I18nText
@@ -19,6 +21,7 @@ from src.core.resonator import TeamMember
 from src.core.resource import Icon
 from src.core.workflow import NodeContext, AbstractWorkflow
 from src.service.common_workflow import RateLimiter
+from src.service.explore_combat import Encounter, ExploreCombatDetector, ExploreCombatFrames, OKWWTargetRecovery
 from src.util import img_util, img_template_util
 from src.util.img_sift_util import SIFTFeatureMatcher
 
@@ -179,6 +182,13 @@ class ExploreWorkflow(AbstractWorkflow):
         super().__init__(ctx)
 
         self.combat_system = None
+        self._automatic_combat = False
+        self._encounter = Encounter()
+        self._combat_detector = ExploreCombatDetector()
+        self._combat_limiter = RateLimiter(4)
+        self._target_recovery = OKWWTargetRecovery()
+        self._target_input = None
+        self._combat_frames = None
         self.click_cooldown = 0.5  # 防止重复点击间隔时间，秒
         self.last_time = time.monotonic() - self.click_cooldown
         self.ui = UIOp(ctx)
@@ -325,7 +335,7 @@ class ExploreWorkflow(AbstractWorkflow):
         cfg = self.ctx.runtime.cfg.explore
         logger.debug(f"{cfg}")
         logger.info(
-            f"AutoCombat: {cfg.autoCombat}, AutoPickup: {cfg.autoPickup}, SkipStory: {cfg.skipStory}, AutoDialogue: {cfg.autoDialogue}")
+            f"AutoCombat: {cfg.autoCombat}, AutoCombatOnEngage: {cfg.autoCombatOnEngage}, AutoPickup: {cfg.autoPickup}, SkipStory: {cfg.skipStory}, AutoDialogue: {cfg.autoDialogue}")
         if not cfg.autoCombat and not cfg.autoPickup and not cfg.skipStory and not cfg.autoDialogue:
             return
 
@@ -344,93 +354,106 @@ class ExploreWorkflow(AbstractWorkflow):
 
             listener.start()
 
-        if cfg.autoPickup or cfg.skipStory or cfg.autoDialogue:
-            ui = UIOp(self.ctx)
-            idx = 0
-            last_pickup_task_limit = 0
+        try:
+            if cfg.autoCombatOnEngage or cfg.autoPickup or cfg.skipStory or cfg.autoDialogue:
+                self._run_explore(cfg)
+            elif listener is not None:
+                listener.join()
+        finally:
+            if listener is not None:
+                listener.stop()
+            with self.combat_lock:
+                self._stop_combat()
 
-            def _is_foreground_window():
-                for i in range(2):
-                    if self.ctx.window_service.is_foreground_window():
-                        return True
-                    # 修复：若游戏重启了，用无效的句柄判断是否为前台将一直返回否，重新拿一次句柄
-                    if i == 0 and self.ctx.window_service.refresh():
-                        continue
-                    break
-                return False
+    def _is_foreground_window(self, *, refresh=False):
+        window = self.ctx.window_service
+        return window.is_foreground_window() or (refresh and window.refresh() and window.is_foreground_window())
 
-            while ui.is_set():
-                try:
-                    # 游戏必须在前台
-                    # 每次都检查前台，但每隔一定时间才尝试刷新句柄。只要不在前台就暂停一会
-                    if (self.foreground_window_limiter() == 0 and not _is_foreground_window()
-                            or not self.ctx.window_service.is_foreground_window()):
-                        # logger.info(f"foreground window disabled")
-                        ui.sleep(1)
-                        continue
+    def _run_explore(self, cfg):
+        ui = self.ui
+        other_actions = cfg.autoPickup or cfg.skipStory or cfg.autoDialogue
+        poll_combat = (self._poll_okww_combat if combat_backend(self.ctx.spec) == CombatBackend.OKWW
+                       else self._poll_combat)
+        idx = 0
+        last_pickup_task_limit = 0
 
-                    # 战斗中不做其他事
-                    if self.combat_system is not None:
-                        ui.sleep(0.3)
-                        continue
-
-                    # 循环间隔
-                    ui.sleep(0.1)
-                    idx += 1
-
-                    # 定时
-                    if self.active_limiter() == 0:
-                        ui.activate()
-
-                    # 限速
-                    if self.task_limiter() == 0:
-                        # logger.info(f"idx task: {idx}")
-                        img = ui.grap()
-
-                        # 剧情：跳过剧情
-                        if cfg.skipStory and self._skip(img):
-                            continue
-
-                        # 剧情：自动对话
-                        if not cfg.skipStory and cfg.autoDialogue and self._dialogue(img):
-                            continue
-
-                        # 剧情：自动播放
-                        if (cfg.skipStory or cfg.autoDialogue) and self._play(img):
-                            continue
-
-                        # 大世界：自动拾取
-                        if cfg.autoPickup and self._pickup(img):
-                            continue
-                    elif cfg.autoPickup:
-                        limit = self.pickup_task_limiter()
-                        if limit > 0:
-                            last_pickup_task_limit = limit
-                            # logger.info(f"pickup_task_limit: {limit}")
-                            continue
-                        # 最小等待时间
-                        if last_pickup_task_limit == 0 and limit == 0:
-                            # logger.info(f"Min pickup sleep: {idx}")
-                            ui.sleep(0.1)
-                        last_pickup_task_limit = limit
-
-                        # logger.info(f"idx pickup: {idx}")
-
-                        # start_time = time.monotonic()
-                        img = ui.grap()
-                        if cfg.autoPickup and self._pickup(img):
-                            # logger.info(f"pickup耗时：{time.monotonic() - start_time}")
-                            continue
-                        # logger.info(f"pickup耗时：{time.monotonic() - start_time}")
-
-                except (KeyboardInterrupt, StopError) as e:
-                    raise e
-                except Exception as e:
-                    logger.exception(e)
+        while ui.is_set():
+            try:
+                if not self._is_foreground_window(refresh=self.foreground_window_limiter() == 0):
+                    with self.combat_lock:
+                        if self._automatic_combat:
+                            self._stop_combat()
+                            self._encounter.handled = False
                     ui.sleep(0.3)
+                    continue
 
-        if listener is not None:
-            listener.join()
+                img = None
+                if cfg.autoCombatOnEngage and self._combat_limiter() == 0:
+                    frames = self._combat_frames
+                    img = frames.frame_for_detection() if frames is not None else ui.grap()
+                    if img is not None:
+                        poll_combat(img)
+
+                if self.combat_system is not None:
+                    ui.sleep(0.2)
+                    continue
+
+                ui.sleep(0.1)
+                idx += 1
+                if not other_actions:
+                    continue
+
+                # 定时
+                if self.active_limiter() == 0:
+                    ui.activate()
+
+                # 限速
+                if self.task_limiter() == 0:
+                    # logger.info(f"idx task: {idx}")
+                    img = ui.grap() if img is None else img
+
+                    # 剧情：跳过剧情
+                    if cfg.skipStory and self._skip(img):
+                        continue
+
+                    # 剧情：自动对话
+                    if not cfg.skipStory and cfg.autoDialogue and self._dialogue(img):
+                        continue
+
+                    # 剧情：自动播放
+                    if (cfg.skipStory or cfg.autoDialogue) and self._play(img):
+                        continue
+
+                    # 大世界：自动拾取
+                    if cfg.autoPickup and self._pickup(img):
+                        continue
+                elif cfg.autoPickup:
+                    limit = self.pickup_task_limiter()
+                    if limit > 0:
+                        last_pickup_task_limit = limit
+                        # logger.info(f"pickup_task_limit: {limit}")
+                        continue
+                    # 最小等待时间
+                    if last_pickup_task_limit == 0 and limit == 0:
+                        # logger.info(f"Min pickup sleep: {idx}")
+                        ui.sleep(0.1)
+                    last_pickup_task_limit = limit
+
+                    # logger.info(f"idx pickup: {idx}")
+
+                    # start_time = time.monotonic()
+                    img = ui.grap() if img is None else img
+                    if cfg.autoPickup and self._pickup(img):
+                        # logger.info(f"pickup耗时：{time.monotonic() - start_time}")
+                        continue
+                    # logger.info(f"pickup耗时：{time.monotonic() - start_time}")
+
+            except (KeyboardInterrupt, StopError) as e:
+                raise e
+            except Exception as e:
+                logger.exception(e)
+                ui.sleep(0.3)
+
 
     def __async_init(self):
 
@@ -731,101 +754,139 @@ class ExploreWorkflow(AbstractWorkflow):
     # def _on_click_ctrl_c(self):
     #     return self._on_click_hotkey("Ctrl+C")
 
+    def _poll_combat(self, img):
+        signal = self._combat_detector.detects_combat(img, world_hud=self.ui.is_on_homepage(img))
+        with self.combat_lock:
+            self._encounter.observe(signal, time.monotonic())
+            if self.combat_system is not None:
+                if self._automatic_combat and not self._encounter.active:
+                    logger.info("Explore combat: enemy HUD cleared")
+                    self._stop_combat()
+            elif self._encounter.active and not self._encounter.handled:
+                self._encounter.handled = True
+                self._start_combat(img, automatic=True)
+
+    def _poll_okww_combat(self, img):
+        with self.combat_lock:
+            combat = self.combat_system
+            fighting = combat is not None and self._automatic_combat
+            now = time.monotonic()
+            recovery = self._target_recovery
+            if fighting and getattr(combat, "combat_check_suspended", False) is True:
+                recovery.reset()
+                self._encounter.observe(True, now)
+                return
+
+            cues = self._combat_detector.okww_cues(img, world_hud=self.ui.is_on_homepage(img), fighting=fighting)
+            self._encounter.observe(cues.locked or cues.enemy_bar, now)
+            can_start = combat is None and self._encounter.active and not self._encounter.handled
+            if cues.locked:
+                recovery.reset()
+                if can_start:
+                    self._start_combat(img, automatic=True, preserve_target_lock=True)
+                    self._encounter.handled = self.combat_system is not None
+                return
+
+            if not fighting and not can_start:
+                recovery.reset()
+                return
+            if recovery.expired(now, enemy_bar=cues.enemy_bar, fighting=fighting):
+                logger.info("Explore combat: target lock not recovered")
+                if fighting:
+                    self._stop_combat()
+                else:
+                    self._encounter.handled = True
+                return
+            if (cues.hud_visible and (fighting or cues.enemy_bar) and self.ui.is_set()
+                    and self._is_foreground_window() and recovery.can_click(now)):
+                if self._target_input is None:
+                    self._target_input = PostMessageCombatInput(self.ctx.window_service)
+                self._target_input.click("middle", 0.02, self.ui.sleep)
+
+    def _start_combat(self, img, *, automatic=False, preserve_target_lock=False):
+        if not self.ui.is_set() or not self._is_foreground_window():
+            return
+        if not automatic and not self.ui.is_on_homepage(img):
+            logger.warning("[%03d] Not in the overworld", self.count)
+
+        member_size = TeamMember.get_size(img)
+        member_keys = TeamMember.get_members_by_icon(img)
+        members = []
+        for i, key in enumerate(member_keys):
+            if i >= member_size:
+                members.append(None)
+            elif key and (translation := self.ctx.tr(key)):
+                members.append(re.sub(r"[·_-]", "", translation.raw))
+            else:
+                members.append("unknown")
+        logger.info("Explore combat: %s start, team: %s", "automatic" if automatic else "hotkey", members)
+
+        images = self.ctx.img_service
+        frames = ExploreCombatFrames(images) if preserve_target_lock else None
+        combat_system = create_combat_system(
+            self.ctx, self.ctx.control_service, frames if frames is not None else images, open_world=True)
+        combat_system.set_resonators(members, is_print=False)
+        combat_system.is_async = True
+        combat_system.check_boss_hp = False
+        combat_system.auto_pickup = self.ctx.runtime.cfg.explore.autoPickup if automatic else True
+        if not self.ui.is_set() or not self._is_foreground_window():
+            return
+        combat_system.start(10 * 60, reset_camera=not preserve_target_lock)
+        self.combat_system = combat_system
+        self._combat_frames = frames
+        self._automatic_combat = automatic
+        self.last_time = time.monotonic()
+
+    def _stop_combat(self):
+        if self.combat_system is not None:
+            self.combat_system.stop(join=True)
+            self.combat_system = None
+            self._combat_frames = None
+            self._automatic_combat = False
+        if self._target_input is not None:
+            self._target_input.release_inputs()
+        self._target_recovery.reset()
+
+    def _stop_combat_from_hotkey(self, key_name):
+        logger.info("[%03d] '%s' stop", self.count, key_name)
+        self.count += 1
+        self._encounter.suppress(time.monotonic())
+        self._stop_combat()
+
     def _on_click(self, button, pressed, key_name):
-        if not pressed:  # 忽略弹起信号
+        if not pressed:
             return True
         try:
-            # logger.debug(f"[{self.count:03d}] '{key_name}' 被按下")
             with self.combat_lock:
-
-                # 游戏在前台才响应指令
-                # 为避免竞争，若其他开关有开启，则自动战斗不刷新句柄，仅判断
                 cfg = self.ctx.runtime.cfg.explore
-                if cfg.autoPickup or cfg.skipStory or cfg.autoDialogue:
-                    if not self.ctx.window_service.is_foreground_window():
-                        logger.info(f"[{self.count:03d}] Not in foreground")
-                        return True
-                else:
-                    for i in range(2):
-                        if not self.ctx.window_service.is_foreground_window():
-                            # 修复：若游戏重启了，用无效的句柄判断是否为前台将一直返回否，重新拿一次句柄
-                            if i == 0 and self.ctx.window_service.refresh():
-                                continue
-                            logger.info(f"[{self.count:03d}] Not in foreground")
-                            return True
-                        break
-
-                # 没启动就启动，已启动就停止
+                polling = cfg.autoCombatOnEngage or cfg.autoPickup or cfg.skipStory or cfg.autoDialogue
+                if not self._is_foreground_window(refresh=not polling):
+                    return True
                 if self.combat_system is None:
-                    logger.info(f"[{self.count:03d}] '{key_name}' start")
-                    self.last_time = time.monotonic()
-
-                    # 等待资源加载
                     with self.async_init_lock:
                         pass
-
-                    img = self.ui.grap()
-                    if not self.ui.is_on_homepage(img):
-                        logger.warning(f"[{self.count:03d}] Not in the overworld")
-                        # return True
-
-                    member_size = TeamMember.get_size(img)
-                    logger.debug(f"member_size: {member_size}")
-                    member_keys = TeamMember.get_members_by_icon(img)
-                    pattern = re.compile(r"[·_-]")
-                    members = []
-                    for i in range(3):
-                        if i + 1 > member_size:
-                            members.append(None)
-                            continue
-                        if member_keys[i] and (tr_res := self.ctx.tr(member_keys[i])):
-                            members.append(pattern.sub("", tr_res.raw))
-                            continue
-                        members.append("unknown")
-                    logger.info(f"team: {members}")
-
-                    combat_system = create_combat_system(self.ctx, self.ctx.control_service, self.ctx.img_service, open_world=True)
-                    combat_system.set_resonators(members, is_print=False)
-                    combat_system.is_async = True
-                    combat_system.check_boss_hp = False
-                    combat_system.auto_pickup = True
-                    combat_system.start(10 * 60)
-                    self.combat_system = combat_system
-                else:
-                    if time.monotonic() - self.last_time < self.click_cooldown:
-                        logger.info(f"[{self.count:03d}] Click Cooldown")
-                        return True
-                    logger.info(f"[{self.count:03d}] '{key_name}' stop")
-                    self.count += 1
-                    combat_system = self.combat_system
-                    self.combat_system = None
-                    if combat_system is not None:
-                        combat_system.stop()
-        except KeyboardInterrupt as e:
+                    self._start_combat(self.ui.grap())
+                elif self._automatic_combat or time.monotonic() - self.last_time >= self.click_cooldown:
+                    self._stop_combat_from_hotkey(key_name)
+        except KeyboardInterrupt:
             return False
-        except StopError as e:
+        except StopError:
             pass
-        except Exception as e:
-            logger.exception(e)
+        except Exception:
+            logger.exception("Explore combat hotkey failed")
         return True
 
     def _on_press(self, key, pressed):
-        if not pressed:  # 忽略弹起信号
+        if not pressed:
             return True
         try:
             with self.combat_lock:
-                combat_system = self.combat_system
-                self.combat_system = None
-                if combat_system is not None:
-                    logger.info(f"[{self.count:03d}] ESC stop")
-                    self.count += 1
-                    combat_system.stop()
-                else:
-                    logger.info(f"[{self.count:03d}] ESC skip")
-        except KeyboardInterrupt as e:
+                if self.combat_system is not None and self._is_foreground_window():
+                    self._stop_combat_from_hotkey("ESC")
+        except KeyboardInterrupt:
             return False
-        except StopError as e:
+        except StopError:
             pass
-        except Exception as e:
-            logger.exception(e)
+        except Exception:
+            logger.exception("Could not stop explore combat")
         return True

@@ -109,6 +109,7 @@ class DailyConfig(ConfigBase):
 
 class ExploreConfig(ConfigBase):
     autoCombat: bool | None = None
+    autoCombatOnEngage: bool = False
     autoPickup: bool | None = None
     skipStory: bool | None = None
     autoDialogue: bool | None = None

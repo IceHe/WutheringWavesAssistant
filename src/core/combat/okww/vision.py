@@ -102,6 +102,19 @@ def _scaled_features(name, width, height):
 
 
 class Vision:
+    def get_target_names(self):
+        suffix = "_169" if self.screen_width == 1600 else ""
+        return "has_target" + suffix, "no_target" + suffix
+
+    def has_target(self):
+        target, no_target = self.get_target_names()
+        regions = (self.get_box_by_name(target).scale(1.2), "box_target_enemy_long",
+                   "target_box_long2", "target_box_short")
+        for region in regions:
+            if match := self.find_best_match_in_box(region, (target, no_target), threshold=0.6):
+                return match.name == target
+        return False
+
     @property
     def screen_width(self):
         return self.frame.shape[1]

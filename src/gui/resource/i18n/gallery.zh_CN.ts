@@ -2262,6 +2262,14 @@
 <context>
     <name>StoryExploreWidget</name>
     <message>
+        <source>Start automatically in combat</source>
+        <translation>进战自动开始</translation>
+    </message>
+    <message>
+        <source>A hotkey or ESC stops auto combat until the next fight.</source>
+        <translation>按战斗热键或 Esc 停止本场自动战斗，下次进战时恢复。</translation>
+    </message>
+    <message>
         <location filename="../../view/home/explore.py" line="62"/>
         <source>Auto Combat:</source>
         <translation>自动战斗:</translation>
