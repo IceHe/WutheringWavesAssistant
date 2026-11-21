@@ -1,0 +1,157 @@
+"""CombatSystem-compatible lifecycle for OKWW's character rotation."""
+
+import logging
+import threading
+import time
+
+from src.core.combat.combat_core import BaseResonator
+from src.core.combat.combat_system import CombatSystem
+from src.core.exceptions import StopError
+
+from .rotation import NotInCombatException
+from .runtime import CombatRuntime
+from .vision import template_index
+
+logger = logging.getLogger(__name__)
+
+
+class OKWWCombatSystem:
+    def __init__(self, control, images, window, ocr, task_event, *, open_world=False):
+        template_index()
+        self.control_service = control
+        self.img_service = images
+        self.is_async = False
+        self.auto_pickup = False
+        self.check_boss_hp = True
+        self.resonators = None
+        self._task_event = task_event
+        self._open_world = open_world
+        self._window = window
+        self._lock = threading.Lock()
+        self._thread = None
+        self._active = False
+        self._generation = 0
+        self._running_generation = 0
+        self._deadline = None
+        self._idle = threading.Event()
+        self._idle.set()
+        self._runtime = CombatRuntime(control, images, window, ocr, self._checkpoint, open_world=open_world)
+        self._special_states = None
+
+    @property
+    def is_paused(self):
+        return self._idle.is_set()
+
+    def set_resonators(self, resonator_names_zh, is_print=True):
+        hints = tuple(name if name and name.casefold() != "none" else None for name in resonator_names_zh)
+        with self._lock:
+            previous = self.resonators
+            self.resonators = hints
+            if previous != hints and self._active:
+                self._generation += 1
+        if is_print:
+            logger.info("OKWW team hints: %s", hints)
+
+    def start(self, delay_seconds=0.0):
+        with self._lock:
+            if self._task_event is not None and not self._task_event.is_set():
+                return
+            now = time.monotonic()
+            if not self._active or (self._deadline is not None and now >= self._deadline):
+                self._active = True
+                self._generation += 1
+            self._deadline = now + delay_seconds if delay_seconds > 0 else None
+            if self._thread is not None:
+                return
+            self._idle.clear()
+            if self.is_async:
+                self._thread = threading.Thread(target=self._run, name="OKWWCombat", daemon=True)
+                self._thread.start()
+                return
+            self._thread = threading.current_thread()
+        self._run()
+
+    def pause(self, join=False, timeout=5):
+        with self._lock:
+            self._active = False
+            self._generation += 1
+            worker = self._thread
+        if join and worker is not None and worker is not threading.current_thread():
+            if not self._idle.wait(timeout):
+                logger.warning("OKWW worker is still releasing combat inputs")
+
+    def stop(self, join=False):
+        self.pause(join=join, timeout=3)
+
+    def _checkpoint(self):
+        with self._lock:
+            cancelled = (not self._active or self._generation != self._running_generation
+                         or (self._deadline is not None and time.monotonic() >= self._deadline))
+        if cancelled or (self._task_event is not None and not self._task_event.is_set()):
+            raise StopError()
+        if self._open_world and not self._window.is_foreground_window():
+            raise StopError()
+
+    def _run(self):
+        runtime = self._runtime
+        while True:
+            with self._lock:
+                if not self._active:
+                    self._thread = None
+                    self._idle.set()
+                    return
+                generation = self._generation
+                self._running_generation = generation
+                hints = self.resonators or ()
+            try:
+                runtime.reset_session()
+                runtime.hints = hints
+                armed = False
+                while True:
+                    runtime.auto_pickup = self.auto_pickup
+                    runtime.check_boss_hp = self.check_boss_hp
+                    runtime.next_frame()
+                    if not runtime.load_chars():
+                        runtime._wait(0.15)
+                        continue
+                    runtime.check_combat(fresh=False)
+                    if not armed:
+                        self._checkpoint()
+                        self.control_service.camera_reset()
+                        armed = True
+                    runtime.get_current_char().perform()
+                    runtime.release_inputs()
+                    runtime.pickup_if_enabled()
+            except StopError:
+                pass
+            except NotInCombatException as error:
+                logger.info("OKWW combat paused: %s", error)
+            except Exception:
+                logger.exception("OKWW combat stopped after a backend error")
+            finally:
+                runtime.release_inputs()
+                with self._lock:
+                    if generation == self._generation:
+                        self._active = False
+
+    def is_boss_health_bar_exist(self, img=None):
+        return BaseResonator.is_boss_health_bar_exist(self.img_service.screenshot() if img is None else img)
+
+    def boss_immobilized_bar_exist(self, img=None):
+        return BaseResonator.boss_immobilized_bar_exist(self.img_service.screenshot() if img is None else img)
+
+    def exit_special_state(self, morph):
+        # WWA workflows use these actions to make navigation safe outside combat.
+        self.pause(join=True)
+        if not self.is_paused:
+            return False
+        if self._task_event is not None and not self._task_event.is_set():
+            return False
+        if self._special_states is None:
+            self._special_states = CombatSystem(self.control_service, self.img_service)
+        hints = list(self.resonators or ())
+        for i, name in enumerate(hints):
+            if name is None:
+                hints[i] = "None"
+        self._special_states.set_resonators(hints, is_print=False)
+        return self._special_states.exit_special_state(morph)
