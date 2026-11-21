@@ -8,6 +8,7 @@ from typing import Optional
 
 from src.core.color import ColorRule, Color, ColorMatch
 from src.core.combat.combat_core import Morph
+from src.core.combat.backend import create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.enemy import Enemy, EnemyHpBar, EnemyMeta, EnemyVsBar, AbsorbMode
 from src.core.geometry import AnchorBBox, Align, AnchorPoint, PointKind, Point
@@ -112,7 +113,7 @@ def doCombat(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
     # 设置战斗参数
     if local.combat_system is None:
-        local.combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+        local.combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
         local.combat_system.set_resonators(local.members, is_print=False)
         local.combat_system.is_async = True
         local.combat_system.check_boss_hp = True
@@ -1019,7 +1020,7 @@ def doEnemyTracing(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
     # 设置战斗参数
     if local.combat_system is None:
-        local.combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+        local.combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
         local.combat_system.set_resonators(local.members, is_print=False)
         local.combat_system.is_async = True
         local.combat_system.check_boss_hp = True

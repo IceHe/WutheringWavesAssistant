@@ -6,6 +6,7 @@ from typing import Optional
 
 from src.core.color import ColorRule, Color
 from src.core.combat.combat_core import Morph
+from src.core.combat.backend import create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.dungeon import Dungeon
 from src.core.enemy import Enemy, AbsorbMode
@@ -1064,7 +1065,7 @@ def doForgeryChallenge(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                 ui.pick_up(2, 0.2).sleep(0.3)
 
                 # 打
-                combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = False
@@ -1323,7 +1324,7 @@ def doBossChallenge(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     ctx.control_service.attack()
                     ui.sleep(0.6)
 
-                combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = True
@@ -1620,7 +1621,7 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     return _fail()
 
                 # 直接打，打起来才会有文字提示
-                combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = False
@@ -1891,7 +1892,7 @@ def doWeeklyChallenge(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     ctx.control_service.attack()
                     ui.sleep(0.6)
 
-                combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = True
@@ -2187,7 +2188,7 @@ def doNightmarePurification(ctx: NodeContext, local: TaskLocal, **kwargs) -> boo
                 return False
 
             # 开始战斗
-            combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+            combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
             combat_system.set_resonators(local.members, is_print=False)
             combat_system.is_async = True
             combat_system.check_boss_hp = False
@@ -2408,7 +2409,7 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                 return False
 
             # 前往战斗区域
-            combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+            combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
             combat_system.set_resonators(local.members, is_print=False)
             combat_system.exit_special_state(Morph.Forced)
             ui.move(dungeon.routes).sleep(0.3)
@@ -2524,7 +2525,7 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     logger.debug(f"k: {k}")
                 # 没刷就打
                 if is_combat:
-                    combat_system = CombatSystem(ctx.control_service, ctx.img_service)
+                    combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
                     combat_system.set_resonators(local.members, is_print=False)
                     combat_system.is_async = True
                     combat_system.check_boss_hp = False

@@ -326,7 +326,13 @@ class BasicSettingWidget(QWidget):
         self.deviceComboBox.addItem("CPU", userData="CPU")
         self.deviceComboBox.setCurrentIndex(0)
 
+        self.combatBackendComboBox = ComboBox(self)
+        for backend in paramConfig.combatBackend.validator.options:
+            self.combatBackendComboBox.addItem(backend, userData=backend)
+        self.combatBackendComboBox.setToolTip(self.tr("Applies to newly started tasks."))
+
         self.formLayout = QFormLayout()
+        self.formLayout.addRow(self.tr("Combat Logic:"), self.combatBackendComboBox)
         self.formLayout.addRow(self.tr("In-Game Text:"), self.langComboBox)
         self.formLayout.addRow(self.tr("Resource Quality:"), self.resourceQualityComboBox)
         self.formLayout.addRow(self.tr("Device:"), self.deviceComboBox)
@@ -359,6 +365,7 @@ class BasicSettingWidget(QWidget):
         self.langComboBox.currentIndexChanged.connect(self.__onLangComboBoxChanged)
         self.resourceQualityComboBox.currentIndexChanged.connect(self.__onResourceQualityChanged)
         self.deviceComboBox.currentIndexChanged.connect(self.__onDeviceComboBoxChanged)
+        self.combatBackendComboBox.currentIndexChanged.connect(self.__onCombatBackendChanged)
         signalBus.homeMessageSignal.connect(self.__onMessageChanged)
 
     def __onLangComboBoxChanged(self, index):
@@ -366,6 +373,9 @@ class BasicSettingWidget(QWidget):
 
     def __onResourceQualityChanged(self, index):
         paramConfig.set(paramConfig.resourceQuality, self.resourceQualityComboBox.currentData())
+
+    def __onCombatBackendChanged(self, index):
+        paramConfig.set(paramConfig.combatBackend, self.combatBackendComboBox.itemData(index))
 
     def __onDeviceComboBoxChanged(self, index):
         paramConfig.set(paramConfig.device, self.deviceComboBox.currentData())
@@ -378,6 +388,9 @@ class BasicSettingWidget(QWidget):
             scrollbar.setValue(scrollbar.maximum())
 
     def __loadConfig(self):
+        backend = paramConfig.get(paramConfig.combatBackend)
+        self.combatBackendComboBox.setCurrentIndex(self.combatBackendComboBox.findData(backend))
+
         if gameLanguage := paramConfig.get(paramConfig.gameLanguage):
             index = self.langComboBox.findData(gameLanguage)
             if index >= 0:

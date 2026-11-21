@@ -4,6 +4,14 @@
 <context>
     <name>BasicSettingWidget</name>
     <message>
+        <source>Combat Logic:</source>
+        <translation>角色战斗逻辑:</translation>
+    </message>
+    <message>
+        <source>Applies to newly started tasks.</source>
+        <translation>从下一次启动任务时生效。</translation>
+    </message>
+    <message>
         <location filename="../../view/home_interface.py" line="297"/>
         <source>General Settings</source>
         <translation>基础设置</translation>

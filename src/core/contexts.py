@@ -80,6 +80,7 @@ class Context(BaseModel):
     boss_task_ctx: BossTaskContext = Field(default_factory=BossTaskContext, title="刷boss声骸上下文")
     spec: TaskSpec = None
     _container: Any = PrivateAttr()
+    _combat_task_event: Any = PrivateAttr(default=None)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

@@ -1,3 +1,4 @@
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -113,7 +114,13 @@ class ExploreConfig(ConfigBase):
     autoDialogue: bool | None = None
 
 
+class CombatBackend(StrEnum):
+    WWA = "WWA"
+    OKWW = "OKWW"
+
+
 class GameConfig(ConfigBase):
+    combatBackend: CombatBackend = CombatBackend.WWA
     gameLanguage: str | None = None
     resourceQuality: str | None = None
     gamePath: str | None = None

@@ -10,7 +10,7 @@ import numpy as np
 import win32con
 
 from src.core.color import ColorRule, Color, RuleMode
-from src.core.combat.combat_system import CombatSystem
+from src.core.combat.backend import create_combat_system
 from src.core.exceptions import StopError
 from src.core.geometry import AnchorBBox, Align, AnchorPoint, Scaler
 from src.core.i18n import I18nText
@@ -784,7 +784,7 @@ class ExploreWorkflow(AbstractWorkflow):
                         members.append("unknown")
                     logger.info(f"team: {members}")
 
-                    combat_system = CombatSystem(self.ctx.control_service, self.ctx.img_service)
+                    combat_system = create_combat_system(self.ctx, self.ctx.control_service, self.ctx.img_service, open_world=True)
                     combat_system.set_resonators(members, is_print=False)
                     combat_system.is_async = True
                     combat_system.check_boss_hp = False

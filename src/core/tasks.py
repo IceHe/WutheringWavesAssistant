@@ -78,6 +78,15 @@ class ProcessTask(ABC):
         try:
             if not self._process.is_alive():
                 return
+            # GUI stop clears the event first. Give OKWW's worker time to release
+            # input before terminating a process that is still unwinding its workflow.
+            if (isinstance(self.args, tuple) and len(self.args) >= 2
+                    and isinstance(self.args[1], TaskSpec) and not self.args[0].is_set()):
+                from src.core.combat.backend import CombatBackend, combat_backend
+                if combat_backend(self.args[1]) == CombatBackend.OKWW:
+                    self._process.join(0.75)
+                    if not self._process.is_alive():
+                        return
             self._process.terminate()
             if timeout > 0:
                 self._process.join(timeout)
@@ -287,6 +296,7 @@ def auto_boss_task_run(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
 
         context = Context()
         context.spec = spec
+        context._combat_task_event = event
         # 从快照还原配置
         context.param_config = spec.param_config
         # 新旧配置兼容

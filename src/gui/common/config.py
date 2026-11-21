@@ -15,6 +15,7 @@ from qfluentwidgets import (qconfig, QConfig, ConfigItem, OptionsConfigItem, Boo
                             FolderListValidator, Theme, FolderValidator, ConfigSerializer, EnumSerializer,
                             exceptionHandler, ConfigValidator)
 from src import __version__
+from src.config.config import CombatBackend
 from src.gui.common.boss import BossNameEnum
 from src.gui.common.globals import globalSignal
 
@@ -200,6 +201,8 @@ class ParamConfig(QConfig):
     exploreAutoDialogue = ConfigItem("Explore", "AutoDialogue", False, BoolValidator())
 
     # Game
+    combatBackend = OptionsConfigItem(
+        "Game", "CombatBackend", CombatBackend.WWA.value, OptionsValidator([b.value for b in CombatBackend]))
     gameLanguage = ConfigItem("Game", "GameLanguage", None)
     resourceQuality = ConfigItem("Game", "ResourceQuality", None, OptionsValidator([None, "UHD", "HD", "SD"]))
     gamePath = ConfigItem("Game", "GamePath", "Auto", GameFolderValidator())

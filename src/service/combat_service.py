@@ -1,5 +1,6 @@
 import logging
 
+from src.core.combat.backend import create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.interface import CombatService, WindowService, ImgService, ControlService, BossInfoService
 
@@ -16,7 +17,7 @@ class CombatServiceImpl(CombatService):
         self._control_service: ControlService = control_service
         self._boss_info_service: BossInfoService = boss_info_service
 
-        self._combat_system: CombatSystem = CombatSystem(self._control_service, self._img_service)
+        self._combat_system: CombatSystem = create_combat_system(context, self._control_service, self._img_service)
         self._combat_system.is_async = True
         # self._combat_system.start()
 

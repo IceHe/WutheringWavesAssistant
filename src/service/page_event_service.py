@@ -10,7 +10,7 @@ import numpy as np
 from src.core.boss import BossNameEnum, MoveMode, Direction, RouteStep, DEFAULT_RESTART_TEXT
 from src.core.color import ColorRule, Color, ColorMatch, RuleMode
 from src.core.combat.combat_core import ResonatorNameEnum, BaseResonator, Morph
-from src.core.combat.combat_system import CombatSystem
+from src.core.combat.backend import create_combat_system
 from src.core.contexts import Context, Status
 from src.core.geometry import AnchorPoint, Align, AnchorBBox, BBox, Scaler
 from src.core.i18n import Language
@@ -53,7 +53,7 @@ class PageEventAbstractService(PageEventService, ABC):
         self._Reward_ClaimRewards_TacetSuppression = self.build_Reward_ClaimRewards_TacetSuppression()
         self._build_Reward_ClaimRewards_Boss = self.build_Reward_ClaimRewards_Boss()
 
-        self.combat_system = CombatSystem(control_service, img_service)
+        self.combat_system = create_combat_system(context, control_service, img_service)
         self.combat_system.is_async = True
         self.combat_skip_count = 2
         self.combat_skip_time = time.monotonic()
