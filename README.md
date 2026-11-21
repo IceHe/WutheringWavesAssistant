@@ -109,12 +109,9 @@ python main.py
 
 ### 8️⃣ 更新脚本
 
-```powershell
-git pull
-```
+在 WWA 中选择「重启更新」，或在 Git 工作目录中运行 `WWA一键更新.bat`。两者共用同一个更新流程。`main` 仅做快进更新，`okww-fight` 等开发分支会把本地提交变基到上游 `main`。更新前会暂存已修改和未跟踪的文件，更新后恢复文件和暂存区状态。
 
-若正常不报错，后续可双击更新器 WWA_updater.exe 更新并运行  
-更新后若无法运行或窗口出现闪烁，可看下方常见问题  
+变基冲突时，更新器会撤销本次变基。恢复本地改动发生冲突时，更新器会保留对应的 stash 并显示其编号，方便根据 `git status` 处理。Git 更新完成后会重新打开 WWA。只想更新代码时，可执行 `powershell -NoProfile -File scripts/update.ps1 -NoRestart`。
 
 ### 9️⃣ 管理环境
 

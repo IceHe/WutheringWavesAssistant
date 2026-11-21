@@ -1,111 +1,14 @@
 @echo off
-title WWA Updater
 setlocal
-chcp 65001 >nul
+title WWA Updater
+set "WWA_UPDATE_SCRIPT=%~dp0update.ps1"
+if not exist "%WWA_UPDATE_SCRIPT%" set "WWA_UPDATE_SCRIPT=%~dp0..\..\scripts\update.ps1"
+set "WWA_UPDATE_CHANNEL=%~1"
+if not defined WWA_UPDATE_CHANNEL set "WWA_UPDATE_CHANNEL=0"
+set "WWA_UPDATE_OPTIONS="
+if /i "%~2"=="--no-restart" set "WWA_UPDATE_OPTIONS=-NoRestart"
 
-echo ========================================
-echo WWA Updater
-echo ========================================
-echo.
-
-rem Check that the script is located in temp\update
-for %%I in ("%~dp0.") do set "SCRIPT_DIR=%%~fI"
-for %%I in ("%SCRIPT_DIR%") do set "SCRIPT_DIR_NAME=%%~nxI"
-
-if /i not "%SCRIPT_DIR_NAME%"=="update" goto invalid_directory
-
-for %%I in ("%SCRIPT_DIR%\..") do set "PARENT_DIR=%%~fI"
-for %%I in ("%PARENT_DIR%") do set "PARENT_DIR_NAME=%%~nxI"
-
-if /i not "%PARENT_DIR_NAME%"=="temp" goto invalid_directory
-
-rem Return to project root
-cd /d "%SCRIPT_DIR%\..\.."
-if errorlevel 1 goto failed
-
-set "ROOT=%CD%"
-set "GIT=%ROOT%\git\cmd\git.exe"
-set "LAUNCHER=%ROOT%\WWA.exe"
-set "USE_BUNDLED_GIT=1"
-
-rem Check required files
-if not exist "%ROOT%\.git" goto repository_not_found
-if not exist "%LAUNCHER%" goto launcher_not_found
-
-rem Check bundled git; if missing, fall back to system git
-if exist "%GIT%" goto git_ready
-
-echo [INFO] Bundled Git not found, trying system Git...
-set "GIT=git"
-set "USE_BUNDLED_GIT=0"
-"%GIT%" --version >nul 2>&1
-if errorlevel 1 goto git_not_found
-
-:git_ready
-
-rem Optionally change the origin URL
-set "REPO_URL="
-
-if "%~1"=="1" set "REPO_URL=https://github.com/wakening/WutheringWavesAssistant.git"
-if "%~1"=="2" set "REPO_URL=https://cnb.cool/github.wakening/WutheringWavesAssistant.git"
-if "%~1"=="3" set "REPO_URL=https://atomgit.com/unwaking/WutheringWavesAssistant.git"
-
-if not defined REPO_URL goto fetch_updates
-
-echo [1/3] Setting remote repository...
-"%GIT%" remote set-url origin "%REPO_URL%"
-if errorlevel 1 goto failed
-
-:fetch_updates
-echo.
-echo Fetching updates...
-"%GIT%" fetch
-if errorlevel 1 goto failed
-
-echo.
-if "%USE_BUNDLED_GIT%"=="1" goto reset_upstream
-echo Merging to upstream...
-"%GIT%" merge "@{upstream}"
-if errorlevel 1 goto failed
-goto update_done
-
-:reset_upstream
-echo Resetting to upstream...
-"%GIT%" reset --hard "@{upstream}"
-if errorlevel 1 goto failed
-
-:update_done
-rem Restart application
-echo.
-echo Update completed. Starting WWA...
-start "" "%LAUNCHER%"
-if errorlevel 1 goto failed
-
-echo.
-echo WWA has been started.
-exit
-
-:invalid_directory
-echo [ERROR] update.bat must be located in the project's temp\update directory.
-goto failed
-
-:git_not_found
-echo [ERROR] Git executable not found (neither bundled nor system git is available).
-goto failed
-
-:repository_not_found
-echo [ERROR] Git repository not found:
-echo "%ROOT%\.git"
-goto failed
-
-:launcher_not_found
-echo [ERROR] WWA.exe not found:
-echo "%LAUNCHER%"
-goto failed
-
-:failed
-echo.
-echo [ERROR] Update failed. Please check the messages above.
-echo WWA was not restarted.
-pause
-exit /b 1
+powershell.exe -NoLogo -NoProfile -File "%WWA_UPDATE_SCRIPT%" -Channel "%WWA_UPDATE_CHANNEL%" %WWA_UPDATE_OPTIONS%
+set "WWA_UPDATE_RESULT=%errorlevel%"
+if not "%WWA_UPDATE_RESULT%"=="0" pause
+exit /b %WWA_UPDATE_RESULT%
