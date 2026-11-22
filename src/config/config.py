@@ -89,6 +89,7 @@ class DailyConfig(ConfigBase):
     weeklyChallengeOpen: bool | None = None
     tacetSuppression: str | None = None
     tacetSuppressionOpen: bool | None = None
+    tacetSuppressionRewardWaypoint: bool = False
     forgeryChallenge: str | None = None
     forgeryChallengeOpen: bool | None = None
     simulationChallenge: str | None = None

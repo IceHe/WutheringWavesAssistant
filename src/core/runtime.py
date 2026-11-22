@@ -69,6 +69,7 @@ class DailyRuntimeConfig:
         self.weeklyChallengeOpen: bool = bool(cfg.weeklyChallengeOpen)
         self.tacetSuppression: bool = bool(cfg.tacetSuppression)
         self.tacetSuppressionOpen: bool = bool(cfg.tacetSuppressionOpen)
+        self.tacetSuppressionRewardWaypoint = cfg.tacetSuppressionRewardWaypoint
         self.forgeryChallenge: bool = bool(cfg.forgeryChallenge)
         self.forgeryChallengeOpen: bool = bool(cfg.forgeryChallengeOpen)
         self.simulationChallenge: bool = bool(cfg.simulationChallenge)

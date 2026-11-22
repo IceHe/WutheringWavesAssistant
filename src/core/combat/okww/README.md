@@ -6,6 +6,7 @@ The built-in character routines, registry, and combat templates come from [ok-ol
 - `rotation.py` adapts the cooldown, concerto, and rotation methods from OKWW's `src/task/BaseCombatTask.py`. The adapter confirms switching against the WWA frame, rejects downed targets, and bounds switch attempts.
 - `backend.py`, `runtime.py`, `inputs.py`, and `vision.py` connect the routines to WWA's task lifetime, window, screenshots, and OCR. `post_message.py` follows the battle input sequence of [ok-script 2.0.20](https://pypi.org/project/ok-script/2.0.20/) using WWA's game window and keybindings. Runtime dependencies are supplied by WWA.
 - `templates/` contains the matching assets used by the character registry and combat code. Template filenames retain source resolution and location. The HUD replay fixtures under `tests/core/okww_frames/` contain relevant regions from the upstream `tests/images/` recordings at the same revision.
+- The optional daily tacet reward navigation in `src/service/tacet_rewards.py` adapts `find_treasure_icon` and `do_walk_to_box` from OKWW's `src/task/BaseWWTask.py`, using the original `assets/templates/treasure_icon_3840x2160_2925_970.png`. The reward test fixture is a crop of OKWW's `tests/images/treasure2.png`.
 
 Run the focused replay and lifecycle checks from the WWA project root:
 

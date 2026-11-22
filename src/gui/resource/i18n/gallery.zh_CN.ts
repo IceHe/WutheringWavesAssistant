@@ -530,6 +530,10 @@
         <translation>声骸材料:</translation>
     </message>
     <message>
+        <source>Use OKWW reward waypoint</source>
+        <translation>使用 OKWW 奖励点导航</translation>
+    </message>
+    <message>
         <location filename="../../view/home/daily.py" line="1615"/>
         <source>Weapon and Skill Materials:</source>
         <translation>武器及技能材料:</translation>

@@ -176,6 +176,7 @@ class ParamConfig(QConfig):
     weeklyChallengeOpen = ConfigItem("Daily", "WeeklyChallengeOpen", False, BoolValidator())
     tacetSuppression = ConfigItem("Daily", "TacetSuppression", None)
     tacetSuppressionOpen = ConfigItem("Daily", "TacetSuppressionOpen", False, BoolValidator())
+    tacetSuppressionRewardWaypoint = ConfigItem("Daily", "TacetSuppressionRewardWaypoint", False, BoolValidator())
     forgeryChallenge = ConfigItem("Daily", "ForgeryChallenge", None)
     forgeryChallengeOpen = ConfigItem("Daily", "ForgeryChallengeOpen", False, BoolValidator())
     bossChallenge = ConfigItem("Daily", "BossChallenge", None)

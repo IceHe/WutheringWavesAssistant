@@ -1618,6 +1618,7 @@ class DailyWidget(ScrollArea):
         for item in self.tacetSuppressionList:
             self.tacetSuppressionComboBox.addItem(f"{item.name} - {item.region}", userData=item.id)
             self.tacetSuppressionComboBox.setItemEnabled(self.tacetSuppressionComboBox.count() - 1, item.enable)
+        self.tacetSuppressionRewardWaypointCheckBox = CheckBox(self.tr("Use OKWW reward waypoint"), self.container)
 
         self.forgeryChallengeCheckBox = CheckBox(self.tr("Weapon and Skill Materials:"), self.container)
         self.forgeryChallengeComboBox = ComboBox(self.container)
@@ -1811,6 +1812,9 @@ class DailyWidget(ScrollArea):
         # self.gridLayout.addWidget(self.tacetSuppressionSettingButton, row, 2)
 
         row += 1
+        self.gridLayout.addWidget(self.tacetSuppressionRewardWaypointCheckBox, row, 2)
+
+        row += 1
         self.gridLayout.addWidget(self.__create_up_label(self.bountifulCrescendo), row, 0)
         self.gridLayout.addWidget(self.forgeryChallengeCheckBox, row, 1)
         self.gridLayout.addWidget(self.forgeryChallengeComboBox, row, 2)
@@ -1893,6 +1897,8 @@ class DailyWidget(ScrollArea):
             lambda checked: paramConfig.set(paramConfig.weeklyChallengeOpen, checked))
         for idx, cb in enumerate(self.buttonGroup):
             cb.toggled.connect(lambda checked, c=cb, i=idx: self.__onCheckboxGroupChanged(c, i, checked))
+        self.tacetSuppressionRewardWaypointCheckBox.toggled.connect(
+            lambda checked: paramConfig.set(paramConfig.tacetSuppressionRewardWaypoint, checked))
         self.nightmarePurificationCheckBox.toggled.connect(
             lambda checked: paramConfig.set(paramConfig.nightmarePurificationOpen, checked))
         self.tacetDiscordNestCheckBox.toggled.connect(
@@ -1941,6 +1947,8 @@ class DailyWidget(ScrollArea):
         self.forgeryChallengeCheckBox.setChecked(paramConfig.get(paramConfig.forgeryChallengeOpen))
         self.bossChallengeCheckBox.setChecked(paramConfig.get(paramConfig.bossChallengeOpen))
         self.nightmarePurificationCheckBox.setChecked(paramConfig.get(paramConfig.nightmarePurificationOpen))
+        self.tacetSuppressionRewardWaypointCheckBox.setChecked(paramConfig.get(paramConfig.tacetSuppressionRewardWaypoint))
+        self.tacetSuppressionRewardWaypointCheckBox.setEnabled(self.tacetSuppressionCheckBox.isChecked())
         self.tacetDiscordNestCheckBox.setChecked(paramConfig.get(paramConfig.tacetDiscordNestOpen))
         self.activityCheckBox.setChecked(paramConfig.get(paramConfig.activityOpen))
         self.mailCheckBox.setChecked(paramConfig.get(paramConfig.mailOpen))
@@ -2005,6 +2013,7 @@ class DailyWidget(ScrollArea):
 
         self.tacetSuppressionComboBox.setCurrentIndex(0)
         self.tacetSuppressionCheckBox.setChecked(False)
+        self.tacetSuppressionRewardWaypointCheckBox.setChecked(False)
 
         self.forgeryChallengeComboBox.setCurrentIndex(0)
         self.forgeryChallengeCheckBox.setChecked(False)
@@ -2048,6 +2057,7 @@ class DailyWidget(ScrollArea):
             else:
                 self.buttonGroupComboBox[i].setEnabled(True)
                 paramConfig.set(self.buttonGroupOpen[i], False)
+        self.tacetSuppressionRewardWaypointCheckBox.setEnabled(self.tacetSuppressionCheckBox.isChecked())
 
     def __onNightmarePurificationSelectionChanged(self, indices: set[int]):
         selected = [self.nightmarePurificationComboBox.items[i].userData for i in sorted(indices)]

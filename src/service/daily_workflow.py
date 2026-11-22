@@ -24,6 +24,7 @@ from src.service.common_workflow import (
     query_waveplate_guidebook, query_waveplate_claim_rewards,
     object_detection, search_icon_guidebook, AsyncPickup, RoiEx, Slider, is_white_text, ObjectDetector,
 )
+from src.service.tacet_rewards import open_tacet_reward_dialog
 from src.util import img_util
 from src.util.img_sift_util import SIFTFeatureMatcher
 from src.util.img_tile_util import TileGrid
@@ -1673,7 +1674,10 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     logger.info("Challenge Complete")
 
                     # 寻找领取奖励交互点
-                    if not object_detection(ctx, search_reward=True, timeout=25):
+                    use_waypoint = ctx.runtime.cfg.daily.tacetSuppressionRewardWaypoint
+                    found_reward = (open_tacet_reward_dialog(ctx, ui) if use_waypoint else
+                                    object_detection(ctx, search_reward=True, timeout=25))
+                    if not found_reward:
                         if ui.esc().sleep(0.3).wait().until(
                                 lambda: ui.snapshot()
                                         and _close_blitz_mode(ui)
@@ -1682,7 +1686,7 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                         return _fail()
 
                     # 领取奖励
-                    if not ui.pick_up(2, 0.2).sleep(0.3).wait().until(
+                    if not use_waypoint and not ui.pick_up(2, 0.2).sleep(0.3).wait().until(
                             lambda: ui.snapshot().search(ctx.tr(I18nText.TacetFieldClaim))):
                         return _fail()
 
