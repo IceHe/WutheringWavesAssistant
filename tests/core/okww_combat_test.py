@@ -240,6 +240,71 @@ class CombatLifecycleTest(unittest.TestCase):
         self.assertTrue(backend.is_paused)
         self.assertEqual(control.mock_calls, [])
 
+    @patch("src.core.combat.okww.post_message.win32gui.PostMessage")
+    def test_short_focus_loss_releases_held_input_then_rechecks_party(self, post):
+        owner = threading.Event()
+        owner.set()
+        focus = threading.Event()
+        focus.set()
+        pressed = threading.Event()
+        released = threading.Event()
+        resumed = threading.Event()
+        actions = []
+        frame = replay()
+        vision = runtime_for(frame)
+        target = vision.get_feature_by_name("has_target_169")
+        target.box.crop_frame(frame)[:] = target.mat
+        self.assertTrue(vision.has_target())
+        images = Mock(screenshot=Mock(return_value=frame))
+        window = SimpleNamespace(window=42, is_foreground_window=focus.is_set)
+        backend = OKWWCombatSystem(Mock(), images, window, None, owner, open_world=True)
+        backend.is_async = True
+        backend.check_boss_hp = False
+
+        def track_input(hwnd, message, key, params):
+            if message == win32con.WM_KEYUP and key == ord("E"):
+                released.set()
+
+        def perform(character):
+            actions.append(character)
+            character.task.send_key_down("E")
+            if len(actions) == 1:
+                pressed.set()
+            else:
+                resumed.set()
+            character.task._wait(3)
+
+        post.side_effect = track_input
+        with patch.object(BaseChar, "perform", perform):
+            backend.start(5, reset_camera=True)
+            try:
+                self.assertTrue(pressed.wait(2))
+                focus.clear()
+                self.assertTrue(released.wait(2))
+                self.assertFalse(resumed.is_set())
+                self.assertFalse(backend.is_paused)
+                self.assertEqual(images.screenshot.call_count, 1)
+                focus.set()
+                self.assertTrue(resumed.wait(2))
+                self.assertIsNot(actions[0], actions[1])
+                self.assertEqual(images.screenshot.call_count, 2)
+                self.assertNotIn(win32con.WM_MBUTTONDOWN, [args[1] for args, _ in post.call_args_list])
+            finally:
+                backend.stop(join=True)
+
+    def test_persistent_focus_loss_exits_without_screenshot_or_input(self):
+        images = Mock()
+        window = SimpleNamespace(window=42, is_foreground_window=lambda: False)
+        backend = OKWWCombatSystem(Mock(), images, window, None, None, open_world=True)
+        with (patch("src.core.combat.okww.backend._FOREGROUND_GRACE_SECONDS", 0.03),
+              patch("src.core.combat.okww.post_message.win32gui.PostMessage") as post,
+              self.assertLogs("src.core.combat.okww.backend") as logs):
+            backend.start(1)
+        self.assertTrue(backend.is_paused)
+        self.assertIn("stayed out of the foreground", logs.output[-1])
+        images.screenshot.assert_not_called()
+        post.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

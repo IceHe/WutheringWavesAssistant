@@ -15,6 +15,12 @@ from .vision import template_index
 
 logger = logging.getLogger(__name__)
 
+_FOREGROUND_GRACE_SECONDS = 1.0
+
+
+class _CombatFocusLost(StopError):
+    pass
+
 
 class OKWWCombatSystem:
     def __init__(self, control, images, window, ocr, task_event, *, controls=None, open_world=False):
@@ -91,14 +97,27 @@ class OKWWCombatSystem:
     def stop(self, join=False):
         self.pause(join=join, timeout=3)
 
-    def _checkpoint(self):
+    def _check_session(self):
         with self._lock:
             cancelled = (not self._active or self._generation != self._running_generation
                          or (self._deadline is not None and time.monotonic() >= self._deadline))
         if cancelled or (self._task_event is not None and not self._task_event.is_set()):
             raise StopError()
+
+    def _checkpoint(self):
+        self._check_session()
         if self._open_world and not self._window.is_foreground_window():
-            raise StopError()
+            raise _CombatFocusLost()
+
+    def _wait_for_foreground(self):
+        deadline = time.monotonic() + _FOREGROUND_GRACE_SECONDS
+        while not self._window.is_foreground_window():
+            self._check_session()
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.025)
+        self._check_session()
+        return True
 
     def _run(self):
         runtime = self._runtime
@@ -113,25 +132,15 @@ class OKWWCombatSystem:
                 hints = self.resonators or ()
                 reset_camera = self._reset_camera
             try:
-                runtime.reset_session()
-                runtime.hints = hints
-                armed = False
                 while True:
-                    runtime.auto_pickup = self.auto_pickup
-                    runtime.check_boss_hp = self.check_boss_hp
-                    runtime.next_frame()
-                    if not runtime.load_chars():
-                        runtime._wait(0.15)
-                        continue
-                    runtime.check_combat(fresh=False)
-                    if not armed:
-                        self._checkpoint()
-                        if reset_camera:
-                            runtime.click(key="middle")
-                        armed = True
-                    runtime.get_current_char().perform()
-                    runtime.release_inputs()
-                    runtime.pickup_if_enabled()
+                    try:
+                        self._run_rotation(hints, reset_camera)
+                    except _CombatFocusLost:
+                        runtime.release_inputs()
+                        logger.info("OKWW combat waiting for the game window to regain focus")
+                        if not self._wait_for_foreground():
+                            logger.info("OKWW combat paused: game window stayed out of the foreground")
+                            break
             except StopError:
                 pass
             except NotInCombatException as error:
@@ -143,6 +152,28 @@ class OKWWCombatSystem:
                 with self._lock:
                     if generation == self._generation:
                         self._active = False
+
+    def _run_rotation(self, hints, reset_camera):
+        runtime = self._runtime
+        runtime.reset_session()
+        runtime.hints = hints
+        armed = False
+        while True:
+            runtime.auto_pickup = self.auto_pickup
+            runtime.check_boss_hp = self.check_boss_hp
+            runtime.next_frame()
+            if not runtime.load_chars():
+                runtime._wait(0.15)
+                continue
+            runtime.check_combat(fresh=False)
+            if not armed:
+                self._checkpoint()
+                if reset_camera and (not self._open_world or not runtime.has_target()):
+                    runtime.click(key="middle")
+                armed = True
+            runtime.get_current_char().perform()
+            runtime.release_inputs()
+            runtime.pickup_if_enabled()
 
     def is_boss_health_bar_exist(self, img=None):
         return BaseResonator.is_boss_health_bar_exist(self.img_service.screenshot() if img is None else img)

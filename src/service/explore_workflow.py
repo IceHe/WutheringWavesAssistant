@@ -384,7 +384,7 @@ class ExploreWorkflow(AbstractWorkflow):
             try:
                 if not self._is_foreground_window(refresh=self.foreground_window_limiter() == 0):
                     with self.combat_lock:
-                        if self._automatic_combat:
+                        if self._automatic_combat and not use_okww:
                             self._stop_combat()
                             self._encounter.handled = False
                     ui.sleep(0.3)
@@ -878,14 +878,18 @@ class ExploreWorkflow(AbstractWorkflow):
         try:
             with self.combat_lock:
                 cfg = self.ctx.runtime.cfg.explore
+                use_okww = combat_backend(self.ctx.spec) == CombatBackend.OKWW
                 polling = cfg.autoCombatOnEngage or cfg.autoPickup or cfg.skipStory or cfg.autoDialogue
                 if not self._is_foreground_window(refresh=not polling):
                     return True
+                if use_okww and self.combat_system is not None and self.combat_system.is_paused is True:
+                    self._stop_combat()
                 if self.combat_system is None:
                     with self.async_init_lock:
                         pass
                     self._start_combat(self.ui.grap())
-                elif self._automatic_combat or time.monotonic() - self.last_time >= self.click_cooldown:
+                elif ((self._automatic_combat and not use_okww)
+                      or time.monotonic() - self.last_time >= self.click_cooldown):
                     self._stop_combat_from_hotkey(key_name)
         except KeyboardInterrupt:
             return False

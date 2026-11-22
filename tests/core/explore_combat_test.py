@@ -266,6 +266,39 @@ class ExploreCombatWorkflowTest(unittest.TestCase):
         listener.return_value.join.assert_called_once_with()
         loop.assert_not_called()
 
+    def test_okww_hotkey_during_automatic_start_uses_existing_debounce(self):
+        self.workflow.ctx.spec = TaskSpec(user_config={"Game": {"CombatBackend": "OKWW"}})
+        locked = CombatCues(True, locked=True)
+        self.poll_okww(locked, 10.0)
+        self.poll_okww(locked, 10.25)
+        with patch("src.service.explore_workflow.time.monotonic", return_value=10.4):
+            self.workflow._on_click(None, True, "5")
+        self.backend.stop.assert_not_called()
+        self.backend.start.assert_called_once()
+        with patch("src.service.explore_workflow.time.monotonic", return_value=10.8):
+            self.workflow._on_click(None, True, "5")
+        self.backend.stop.assert_called_once_with(join=True)
+
+    def test_okww_first_hotkey_replaces_idle_worker(self):
+        self.workflow.ctx.spec = TaskSpec(user_config={"Game": {"CombatBackend": "OKWW"}})
+        previous = Mock(is_paused=True)
+        self.workflow.combat_system = previous
+        self.workflow._on_click(None, True, "5")
+        previous.stop.assert_called_once_with(join=True)
+        self.backend.start.assert_called_once_with(600, reset_camera=True)
+        self.assertIs(self.workflow.combat_system, self.backend)
+        self.assertFalse(self.workflow._automatic_combat)
+
+    def test_okww_explore_loop_leaves_short_focus_loss_to_backend(self):
+        self.workflow.ctx.spec = TaskSpec(user_config={"Game": {"CombatBackend": "OKWW"}})
+        self.workflow.combat_system = self.backend
+        self.workflow._automatic_combat = True
+        self.workflow.ctx.window_service.is_foreground_window.return_value = False
+        self.workflow.ui.is_set.side_effect = [True, False]
+        self.workflow._run_explore(self.cfg)
+        self.backend.stop.assert_not_called()
+        self.workflow.ui.grap.assert_not_called()
+
     def test_hotkey_suppresses_current_engagement(self):
         self.poll(True, 10.0)
         self.poll(True, 10.3)
