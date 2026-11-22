@@ -150,6 +150,46 @@ class ExploreCombatWorkflowTest(unittest.TestCase):
         self.backend.stop.assert_called_once_with(join=True)
         self.assertIsNone(self.workflow._combat_frames)
 
+        # A new wave can reappear before the old encounter would have cleared.
+        self.poll_okww(locked, 17.6)
+        self.backend.start.assert_called_once()
+        self.assertTrue(self.detector.okww_cues.call_args.kwargs["fighting"])
+        self.poll_okww(locked, 17.7)
+        self.assertEqual(self.backend.start.call_count, 2)
+        self.assertEqual(self.workflow._okww_recheck_until, 0.0)
+
+    def test_okww_worker_exit_rearms_after_two_fresh_frames(self):
+        locked = CombatCues(True, locked=True)
+        self.poll_okww(locked, 10.0)
+        self.poll_okww(locked, 10.25)
+        self.backend.start.assert_called_once()
+
+        self.backend.is_paused = True
+        self.poll_okww(locked, 12.0)
+        self.assertIsNone(self.workflow.combat_system)
+        self.assertEqual(self.workflow._okww_recheck_until, 15.0)
+        self.backend.stop.assert_called_once_with(join=True)
+        self.backend.is_paused = False
+        self.poll_okww(locked, 12.1)
+        self.backend.start.assert_called_once()
+        self.poll_okww(locked, 12.2)
+        self.assertEqual(self.backend.start.call_count, 2)
+
+    def test_escape_cancels_okww_recheck_while_worker_is_idle(self):
+        locked = CombatCues(True, locked=True)
+        self.poll_okww(locked, 10.0)
+        self.poll_okww(locked, 10.25)
+        self.backend.is_paused = True
+        self.poll_okww(CombatCues(False), 12.0)
+
+        with patch("src.service.explore_workflow.time.monotonic", return_value=12.1):
+            self.workflow._on_press(None, True)
+        self.assertEqual(self.workflow._okww_recheck_until, 0.0)
+        self.poll_okww(locked, 12.2)
+        self.poll_okww(locked, 12.3)
+        self.backend.start.assert_called_once()
+        self.target_input.click.assert_not_called()
+
     def test_okww_failed_initial_lock_is_suppressed_for_current_encounter(self):
         bar = CombatCues(True, enemy_bar=True)
         self.poll_okww(bar, 10.0)
@@ -184,6 +224,30 @@ class ExploreCombatWorkflowTest(unittest.TestCase):
                 self.assertEqual(self.workflow.ui.grap.call_count, 2)
                 self.assertEqual(wwa.call_count, 2 if expected == "wwa" else 0)
                 self.assertEqual(okww.call_count, 2 if expected == "okww" else 0)
+
+    def test_only_okww_polls_each_idle_pass_until_the_window_expires(self):
+        for name, expected in (("OKWW", [10.0, 10.1, 10.2, 13.0, 13.25]),
+                               ("WWA", [10.0, 13.0, 13.25])):
+            with self.subTest(backend=name):
+                self.workflow.ctx.spec = TaskSpec(user_config={"Game": {"CombatBackend": name}})
+                self.workflow._okww_recheck_until = 13.0
+                self.workflow._combat_limiter.next_time = None
+                passes = iter([10.0, 10.1, 10.2, 13.0, 13.1, 13.25])
+                reads = []
+                now = None
+
+                def running():
+                    nonlocal now
+                    now = next(passes, None)
+                    return now is not None
+
+                self.workflow.ui.is_set.side_effect = running
+                self.workflow.ui.grap.side_effect = lambda: reads.append(now) or Mock()
+                with (patch("src.service.explore_workflow.time.monotonic", side_effect=lambda: now),
+                      patch.object(self.workflow, "_poll_okww_combat"),
+                      patch.object(self.workflow, "_poll_combat")):
+                    self.workflow._run_explore(self.cfg)
+                self.assertEqual(reads, expected)
 
     def test_automatic_only_enters_polling_loop(self):
         self.assertFalse(self.cfg.autoPickup)

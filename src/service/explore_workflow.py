@@ -27,6 +27,8 @@ from src.util.img_sift_util import SIFTFeatureMatcher
 
 logger = logging.getLogger(__name__)
 
+OKWW_RECHECK_SECONDS = 3.0
+
 
 # ---------- 修饰键掩码 ----------
 MOD_CTRL  = 1 << 0
@@ -186,6 +188,7 @@ class ExploreWorkflow(AbstractWorkflow):
         self._encounter = Encounter()
         self._combat_detector = ExploreCombatDetector()
         self._combat_limiter = RateLimiter(4)
+        self._okww_recheck_until = 0.0
         self._target_recovery = OKWWTargetRecovery()
         self._target_input = None
         self._combat_frames = None
@@ -372,8 +375,8 @@ class ExploreWorkflow(AbstractWorkflow):
     def _run_explore(self, cfg):
         ui = self.ui
         other_actions = cfg.autoPickup or cfg.skipStory or cfg.autoDialogue
-        poll_combat = (self._poll_okww_combat if combat_backend(self.ctx.spec) == CombatBackend.OKWW
-                       else self._poll_combat)
+        use_okww = combat_backend(self.ctx.spec) == CombatBackend.OKWW
+        poll_combat = self._poll_okww_combat if use_okww else self._poll_combat
         idx = 0
         last_pickup_task_limit = 0
 
@@ -388,7 +391,9 @@ class ExploreWorkflow(AbstractWorkflow):
                     continue
 
                 img = None
-                if cfg.autoCombatOnEngage and self._combat_limiter() == 0:
+                # The idle loop already sleeps for 0.1s. Poll once per pass just after OKWW stops.
+                rechecking = use_okww and time.monotonic() < self._okww_recheck_until
+                if cfg.autoCombatOnEngage and (rechecking or self._combat_limiter() == 0):
                     frames = self._combat_frames
                     img = frames.frame_for_detection() if frames is not None else ui.grap()
                     if img is not None:
@@ -769,15 +774,22 @@ class ExploreWorkflow(AbstractWorkflow):
     def _poll_okww_combat(self, img):
         with self.combat_lock:
             combat = self.combat_system
-            fighting = combat is not None and self._automatic_combat
             now = time.monotonic()
+            if combat is not None and combat.is_paused is True:
+                logger.info("Explore combat: OKWW worker stopped, checking for targets again")
+                self._recheck_after_okww_combat()
+                return
+
+            fighting = combat is not None and self._automatic_combat
             recovery = self._target_recovery
             if fighting and getattr(combat, "combat_check_suspended", False) is True:
                 recovery.reset()
                 self._encounter.observe(True, now)
                 return
 
-            cues = self._combat_detector.okww_cues(img, world_hud=self.ui.is_on_homepage(img), fighting=fighting)
+            rechecking = now < self._okww_recheck_until
+            cues = self._combat_detector.okww_cues(img, world_hud=self.ui.is_on_homepage(img),
+                                                  fighting=fighting or rechecking)
             self._encounter.observe(cues.locked or cues.enemy_bar, now)
             can_start = combat is None and self._encounter.active and not self._encounter.handled
             if cues.locked:
@@ -793,7 +805,7 @@ class ExploreWorkflow(AbstractWorkflow):
             if recovery.expired(now, enemy_bar=cues.enemy_bar, fighting=fighting):
                 logger.info("Explore combat: target lock not recovered")
                 if fighting:
-                    self._stop_combat()
+                    self._recheck_after_okww_combat()
                 else:
                     self._encounter.handled = True
                 return
@@ -802,6 +814,11 @@ class ExploreWorkflow(AbstractWorkflow):
                 if self._target_input is None:
                     self._target_input = PostMessageCombatInput(self.ctx.window_service)
                 self._target_input.click("middle", 0.02, self.ui.sleep)
+
+    def _recheck_after_okww_combat(self):
+        self._stop_combat()
+        self._encounter = Encounter()
+        self._okww_recheck_until = time.monotonic() + OKWW_RECHECK_SECONDS
 
     def _start_combat(self, img, *, automatic=False, preserve_target_lock=False):
         if not self.ui.is_set() or not self._is_foreground_window():
@@ -835,9 +852,11 @@ class ExploreWorkflow(AbstractWorkflow):
         self.combat_system = combat_system
         self._combat_frames = frames
         self._automatic_combat = automatic
+        self._okww_recheck_until = 0.0
         self.last_time = time.monotonic()
 
     def _stop_combat(self):
+        self._okww_recheck_until = 0.0
         if self.combat_system is not None:
             self.combat_system.stop(join=True)
             self.combat_system = None
@@ -881,7 +900,8 @@ class ExploreWorkflow(AbstractWorkflow):
             return True
         try:
             with self.combat_lock:
-                if self.combat_system is not None and self._is_foreground_window():
+                if ((self.combat_system is not None or time.monotonic() < self._okww_recheck_until)
+                        and self._is_foreground_window()):
                     self._stop_combat_from_hotkey("ESC")
         except KeyboardInterrupt:
             return False
