@@ -41,6 +41,10 @@ class BackgroundScreenshotError(ScreenshotError):
         super().__init__(message)
 
 
+class OcrInferenceError(RuntimeError):
+    """The OCR engine failed to run inference on a captured frame."""
+
+
 class WindowError(Exception):
     """Generic window error"""
 

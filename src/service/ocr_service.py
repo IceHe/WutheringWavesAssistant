@@ -3,11 +3,13 @@ import logging
 import re
 import time
 from abc import ABC
+from threading import Lock
 
 import cv2
 import numpy as np
 
 from src.core.contexts import Context
+from src.core.exceptions import OcrInferenceError
 from src.core.geometry import TextBox, BBox, RapidocrTextBox, PaddleocrTextBox, RapidocrRecTextBox
 from src.core.interface import OCRService, ImgService, WindowService
 from src.core.pages import OcrResult
@@ -196,6 +198,7 @@ class AbstractOcrService(OCRService, ABC):
         self._context: Context = context
         self._window_service: WindowService = window_service
         self._img_service: ImgService = img_service
+        self._inference_lock = Lock()
 
         try:
             self._device = context.runtime.cfg.game.device
@@ -205,6 +208,14 @@ class AbstractOcrService(OCRService, ABC):
 
         self._device: Device = self.resolve_device()
         self.ocr_use_gpu = self._device.is_gpu()
+
+    def _infer(self, predict, img, **kwargs):
+        # The task and the combat worker share a predictor with mutable tensors.
+        with self._inference_lock:
+            try:
+                return predict(img, **kwargs)
+            except RuntimeError as error:
+                raise OcrInferenceError(str(error)) from error
 
     def resolve_device(self) -> Device:
         # 配置主动设置为CPU模式
@@ -311,7 +322,7 @@ class RapidOcrServiceImpl(AbstractOcrService):
         raise NotImplementedError("不支持的识别方式")
 
     def _ocr_det_rec(self, img: np.ndarray) -> list[TextPosition]:
-        output = self._engine(img, use_det=True, use_rec=True, use_cls=False)
+        output = self._infer(self._engine, img, use_det=True, use_rec=True, use_cls=False)
         positions = RapidocrPosition.format(output)
         return positions
 
@@ -345,10 +356,10 @@ class RapidOcrServiceImpl(AbstractOcrService):
         img = itf.prepare(img, roi=roi)
         # logger.debug(f"img shape2: {img.shape}")
         if det is True and rec is True and cls is False:
-            output = self._engine(img, use_det=True, use_rec=True, use_cls=False)
+            output = self._infer(self._engine, img, use_det=True, use_rec=True, use_cls=False)
             result = RapidocrTextBox.format(output)
         elif det is False and rec is True and cls is False:
-            output = self._engine(img, use_det=False, use_rec=True, use_cls=False)
+            output = self._infer(self._engine, img, use_det=False, use_rec=True, use_cls=False)
             result = RapidocrRecTextBox.format(output)
         else:
             raise NotImplementedError("不支持的识别方式")
@@ -427,7 +438,7 @@ class PaddleOcrServiceImpl(AbstractOcrService):
         raise NotImplementedError("不支持的识别方式")
 
     def _ocr_det_rec(self, img: np.ndarray) -> list[TextPosition]:
-        output = self._engine.ocr(img, det=True, rec=True, cls=False)
+        output = self._infer(self._engine.ocr, img, det=True, rec=True, cls=False)
         positions = PaddleocrPosition.format(output)
         return positions
 
@@ -461,10 +472,10 @@ class PaddleOcrServiceImpl(AbstractOcrService):
         img = itf.prepare(img, roi=roi)
         # logger.debug(f"img shape2: {img.shape}")
         if det is True and rec is True and cls is False:
-            output = self._engine(img, use_det=True, use_rec=True, use_cls=False)
+            output = self._infer(self._engine, img, use_det=True, use_rec=True, use_cls=False)
             result = PaddleocrTextBox.format(output, roi)
         elif det is False and rec is True and cls is False:
-            output = self._engine(img, use_det=False, use_rec=True, use_cls=False)
+            output = self._infer(self._engine, img, use_det=False, use_rec=True, use_cls=False)
             result = PaddleocrTextBox.format(output, roi)
         else:
             raise NotImplementedError("不支持的识别方式")

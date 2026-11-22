@@ -10,7 +10,7 @@ from src.core.combat.backend import create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.dungeon import Dungeon
 from src.core.enemy import Enemy, AbsorbMode
-from src.core.exceptions import StopError
+from src.core.exceptions import OcrInferenceError, StopError
 from src.core.geometry import AnchorBBox, Align, AnchorPoint, PointKind, Point
 from src.core.i18n import I18nText
 from src.core.message import MsgType, MsgTaskStatus, MsgSource
@@ -2517,118 +2517,85 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
             cleared_keyword = ctx.tr([
                 I18nText.TacetDiscordNestCleared, I18nText.TacetDiscordNestClearedMengzhou, I18nText.RefreshesTomorrow])
-            is_combat = not ui.snapshot().search(cleared_keyword)
-            # 可能打着打着出了战斗区域，标识文本消失，误判已经打完，循环重置位置接着打
-            max_combat_range = 3
-            for k in range(max_combat_range):
-                if k > 0:
-                    logger.debug(f"k: {k}")
-                # 没刷就打
-                if is_combat:
-                    combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
-                    combat_system.set_resonators(local.members, is_print=False)
-                    combat_system.is_async = True
-                    combat_system.check_boss_hp = False
-                    combat_system.auto_pickup = False
-                    # combat_system.exit_special_state(Morph.Forced)
+            active_keyword = ctx.tr([I18nText.ClearTheTacetDiscordNest, I18nText.ClearTheTacetDiscordNestMengzhou])
+            cleared = bool(ui.snapshot().search(cleared_keyword))
+            # 离开战斗区域时任务提示会消失，最多重置位置三次。
+            for _ in range(3):
+                if cleared:
+                    break
+                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+                combat_system.set_resonators(local.members, is_print=False)
+                combat_system.is_async = True
+                combat_system.check_boss_hp = False
+                combat_system.auto_pickup = False
 
-                    timeout = 10 * 60
-                    deadline = time.monotonic() + timeout
-                    no_text_max = 3
-                    no_text_count = no_text_max
-
-                    while ui.is_set() or time.monotonic() < deadline:
-                        logger.debug(f"no_text_count: {no_text_count}")
-                        if no_text_count < 0:
-                            break
+                deadline = time.monotonic() + 10 * 60
+                no_text_max = 3
+                no_text_count = no_text_max
+                try:
+                    while ui.is_set() and time.monotonic() < deadline and no_text_count >= 0:
                         combat_system.start(3.5)
                         ui.sleep(1.5)
-                        ui.snapshot()
+                        try:
+                            ui.snapshot()
+                        except OcrInferenceError as error:
+                            combat_system.stop(join=True)
+                            logger.warning("OCR failed while fighting at %s, retrying in place: %s",
+                                           dungeon_name.raw, error)
+                            ui.sleep(0.5).snapshot()
                         if ui.is_on_homepage():
-                            # 残象聚落已清理
-                            logger.debug(f"result: {ui.bbox_result}")
                             if ui.search(cleared_keyword):
+                                cleared = True
                                 break
-                            # 清理聚落中的残象
-                            if ui.search(ctx.tr(
-                                    [I18nText.ClearTheTacetDiscordNest, I18nText.ClearTheTacetDiscordNestMengzhou])):
-                                logger.debug("战斗中")
+                            if ui.search(active_keyword):
                                 no_text_count = no_text_max
                                 continue
-                            else:
-                                logger.debug(f"Text not found: {ctx.tr(I18nText.ClearTheTacetDiscordNest).raw}")
-                            # boxes = img_util.detect_hp_bar(img, hp_roi)
-                            # if boxes:
-                            #     logger.debug("有血条，还在战斗中")
-                            #     no_text_count = no_text_max
-                            #     if logger.isEnabledFor(logging.DEBUG):
-                            #         img_draw = img_util.draw_detect_hp_bar(img, boxes)
-                            #         img_util.save_img_in_temp(img_draw)
-                            #     continue
                             no_text_count -= 1
 
-                        if page_key := GlobalPage(ctx).action(ui=ui):
-                            if page_key == GlobalPage.InternetDisconnecting:
-                                combat_system.stop(join=True)
-                                return False
-
+                        if GlobalPage(ctx).action(ui=ui) == GlobalPage.InternetDisconnecting:
+                            return False
+                finally:
                     combat_system.stop(join=True)
-                    # 检查复苏弹窗
-                    if ui.sleep(0.5).snapshot().search(ctx.tr(I18nText.SelectARevivalItem)):
-                        ui.esc().sleep(0.5)
-                    combat_system.exit_special_state(Morph.Prefer)
-                    ui.sleep(0.3)
 
-                    ctx.control_service.camera_reset()
-                    ui.sleep(0.5)
+                # 检查复苏弹窗并退出特殊形态，随后从聚落入口走一遍拾取路线。
+                if ui.sleep(0.5).snapshot().search(ctx.tr(I18nText.SelectARevivalItem)):
+                    ui.esc().sleep(0.5)
+                combat_system.exit_special_state(Morph.Prefer)
+                ui.sleep(0.3)
+                ctx.control_service.camera_reset()
+                ui.sleep(0.5)
+                ui.pick_up(2, 0.2).sleep(0.2)
 
-                    # # 声骸刚好掉在脚下，直接吸收结束，不用后续操作
-                    # if ui.search(ctx.tr(I18nText.Absorb), RoiEx(ctx).dialogue):
-                    #     logger.info("Tacet Discord Nest Cleared")
-                    #     ui.pick_up(2, 0.2)
-                    #     cur_fsm.complete()
-                    #     return True
-                    ui.pick_up(2, 0.2).sleep(0.2)
-
-                    # 重置位置
-                    if not _map_fast_travel():
-                        # 原地传送失败就结束
-                        if fsm.count == 0:
-                            # 没找到吸收，再次来不管怎样都结束掉
+                if not _map_fast_travel():
+                    if fsm.count == 0:
+                        if cleared:
                             fsm.complete()
-                        return True
-                    # 前往战斗区域
-                    with AsyncPickup(ctx, delay=1.0):
-                        ui.move(dungeon.routes)
-                    ui.sleep(0.3)
+                        else:
+                            fsm.fail()
+                    return cleared
+                with AsyncPickup(ctx, delay=1.0):
+                    ui.move(dungeon.routes)
+                ui.sleep(0.3)
+                cleared = cleared or bool(ui.snapshot().search(cleared_keyword))
 
-                    is_combat = not ui.snapshot().search(cleared_keyword)
-                    if k == max_combat_range - 1:
-                        # 打了几回都没打完，重新来
-                        if fsm.count == 0:
-                            break
-                        return True
-                    continue
-                # else:
-                #     ctx.control_service.camera_reset()
-                #     ui.sleep(0.5)
-                #     logger.info("Tacet Discord Nest Cleared")
-                #
-                #     # 声骸刚好掉在脚下，直接吸收结束，不用后续操作
-                #     if ui.search(ctx.tr(I18nText.Absorb), RoiEx(ctx).dialogue):
-                #         ui.pick_up(2, 0.2)
-                #         cur_fsm.complete()
-                #         return True
-                #     break
+            if not cleared:
+                logger.warning("Tacet Discord Nest clear not confirmed: %s", dungeon_name.raw)
+                if fsm.count == 0:
+                    fsm.fail()
+                return False
 
-            # 吸收
             absorb_around_variant_blind(ctx)
-            # 不管怎样都结束掉
             fsm.complete()
             return True
 
-        except (KeyboardInterrupt, StopError) as e:
-            raise e
+        except (KeyboardInterrupt, StopError):
+            raise
+        except OcrInferenceError:
+            logger.exception("OCR failed at %s", dungeon_name.raw)
+            if fsm.count == 0:
+                fsm.fail()
+            # 返回调度器恢复页面，下次仍从这处聚落开始。
+            return False
         except Exception as e:
             logger.exception(e)
 

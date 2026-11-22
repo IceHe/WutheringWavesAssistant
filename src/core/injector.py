@@ -54,7 +54,7 @@ class Container(containers.DeclarativeContainer):
         context=context,
         window_service=window_service
     )
-    ocr_service = providers.Singleton(
+    ocr_service = providers.ThreadSafeSingleton(
         ocr_engine_impl,
         context=context,
         window_service=window_service,
