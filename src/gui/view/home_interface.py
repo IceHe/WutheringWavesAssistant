@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal, QTimer, QUrl
+from PySide6.QtCore import Qt, Signal, QTime, QTimer, QUrl
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLabel, QHBoxLayout, QStackedWidget, QButtonGroup, QApplication,
                                QFormLayout)
@@ -22,6 +22,7 @@ from qfluentwidgets import (ScrollArea, ComboBox, TextEdit, Pivot, Indeterminate
 from src import __version__
 from src.core.i18n import Language
 from src.gui.common.config import paramConfig, VERSION, RELEASE_URL, CHANGELOG_URL
+from src.gui.common.daily_schedule import DailySchedule
 from src.gui.common.globals import GlobalSignal, globalSignal
 from src.gui.common.signal_bus import signalBus
 from src.gui.view.home.daily import DailyWidget
@@ -536,21 +537,28 @@ class BottomWidget(CardWidget):
             self.__refreshButton(False)
             return
 
+        self.submitTaskIfIdle(self.currentTask)
+
+    def submitTaskIfIdle(self, task) -> bool:
+        """Return whether this submission was handled, including validation errors."""
+        if self._submittedTask is not None:
+            return False
         self.__refreshButton(True)
         try:
-            result = self.currentTask.submitTask(True)
+            result = task.submitTask(True)
         except Exception as e:
             logger.exception(f"submit task error", e)
             self.__refreshButton(False)
-            return
+            return True
 
         logger.debug(f"submit task result: {result}")
         if result.success:
-            self._submittedTask = self.currentTask
+            self._submittedTask = task
         else:
             # self.button.setChecked(False)
             self.__refreshButton(False)
             self.createTopRightInfoWarningBar(self.tr('Validate: '), result.message, 5000)
+        return True
 
     def __refreshButton(self, start: bool):
         if start:
@@ -571,21 +579,21 @@ class BottomWidget(CardWidget):
 
     def __on_task_finished(self, task_name):
         logger.debug(f"task_finished: {task_name}")
-
-        if self._submittedTask is not None:
-            elapsed = ""
-            if self._submittedTask.start_time:
-                elapsed_seconds = (datetime.now() - self._submittedTask.start_time).total_seconds()
-                hours, remainder = divmod(elapsed_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
-                if int(hours) > 0:
-                    elapsed = f", {int(hours)}h {int(minutes)}m {seconds:.2f}s"
-                elif int(minutes) > 0:
-                    elapsed = f", {int(minutes)}m {seconds:.2f}s"
-                else:
-                    elapsed = f", {seconds:.2f}s"
-            signalBus.homeMessageSignal.emit(f"{self.tr("Stop")} {self._submittedTask.name}{elapsed}")
-            self._submittedTask = None
+        if self._submittedTask is None or self._submittedTask.id != task_name:
+            return
+        elapsed = ""
+        if self._submittedTask.start_time:
+            elapsed_seconds = (datetime.now() - self._submittedTask.start_time).total_seconds()
+            hours, remainder = divmod(elapsed_seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            if int(hours) > 0:
+                elapsed = f", {int(hours)}h {int(minutes)}m {seconds:.2f}s"
+            elif int(minutes) > 0:
+                elapsed = f", {int(minutes)}m {seconds:.2f}s"
+            else:
+                elapsed = f", {seconds:.2f}s"
+        signalBus.homeMessageSignal.emit(f"{self.tr("Stop")} {self._submittedTask.name}{elapsed}")
+        self._submittedTask = None
 
         self.spinner.stop()
         self.spinner.reset()
@@ -683,6 +691,40 @@ class HomeV2Interface(ScrollArea):
         self.__initWidget()
 
         self.contentWidget.refreshDefaultTask()
+
+    def enableDailyScheduling(self, active_task_names):
+        self._active_task_names = active_task_names
+        self._daily_schedule = DailySchedule()
+        self._daily_schedule_timer = QTimer(self)
+        self._daily_schedule_timer.setInterval(5000)
+        self._daily_schedule_timer.timeout.connect(self._pollDailySchedule)
+        globalSignal.closeMainWindowSignal.connect(self._daily_schedule_timer.stop)
+        paramConfig.dailyScheduleEnabled.valueChanged.connect(self._configureDailySchedule)
+        paramConfig.dailyScheduleTime.valueChanged.connect(self._configureDailySchedule)
+        self._configureDailySchedule()
+
+    def _configureDailySchedule(self):
+        enabled = paramConfig.get(paramConfig.dailyScheduleEnabled)
+        start_time = QTime.fromString(paramConfig.get(paramConfig.dailyScheduleTime), "HH:mm")
+        self._daily_schedule.configure(datetime.now(), start_time.toPython() if enabled else None)
+        if enabled:
+            self._daily_schedule_timer.start()
+        else:
+            self._daily_schedule_timer.stop()
+
+    def _pollDailySchedule(self):
+        last_date = paramConfig.get(paramConfig.dailyScheduleLastDate) or ""
+        date = self._daily_schedule.poll(datetime.now(), last_date, self._submitScheduledDaily)
+        if date is not None:
+            paramConfig.set(paramConfig.dailyScheduleLastDate, date)
+            logger.info("Processed scheduled daily start for %s", date)
+
+    def _submitScheduledDaily(self):
+        task = self.contentWidget.daily.task
+        active = self._active_task_names()
+        if active:
+            return task.id in active
+        return self.bottomWidget.submitTaskIfIdle(task)
 
     def __initWidget(self):
         self.container.setObjectName('view')

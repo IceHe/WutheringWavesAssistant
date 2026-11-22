@@ -2,7 +2,7 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, QSize, QEvent, QCoreApplication
+from PySide6.QtCore import Qt, Signal, QSize, QEvent, QCoreApplication, QTime
 from PySide6.QtGui import QIcon, QColor, QIntValidator
 from PySide6.QtWidgets import (QWidget, QLabel, QFileDialog, QFrame, QVBoxLayout, QButtonGroup, QHBoxLayout,
                                QPushButton, QApplication, QSizePolicy, QFormLayout, QCheckBox, QGridLayout,
@@ -15,12 +15,12 @@ from qfluentwidgets import (FluentIcon as FIF, OptionsSettingCard, SwitchSetting
                             SettingCard, ComboBox, ConfigItem,
                             PushButton, ToolButton, MessageBox, ToggleToolButton, ToolTipFilter,
                             TransparentTogglePushButton, PrimarySplitToolButton, TransparentToggleToolButton,
-                            TransparentToolButton)
+                            TransparentToolButton, TimeEdit)
 
 from src.core.i18n import I18nText
 from src.core.resonator import Resonator
 from src.core.resource import Resource
-from src.gui.common.config import paramConfig
+from src.gui.common.config import DEFAULT_DAILY_SCHEDULE_TIME, paramConfig
 from src.gui.common.globals import globalParam, globalSignal
 from src.gui.common.style_sheet import StyleSheet
 from src.gui.common.task import TaskId, BaseTask, ValidationResult
@@ -1670,6 +1670,13 @@ class DailyWidget(ScrollArea):
         self.startGameCheckBox.installEventFilter(ToolTipFilter(self.startGameCheckBox))
         self.startGameCheckBox.setToolTip(self.tr("The game path can be adjusted in the settings"))
 
+        self.dailyScheduleCheckBox = CheckBox(self.tr("Scheduled daily start"), self.container)
+        self.dailyScheduleCheckBox.setToolTip(self.tr("Keep WWA running to start dailies at the selected local time."))
+        self.dailyScheduleTimeEdit = TimeEdit(self.container)
+        self.dailyScheduleTimeEdit.setDisplayFormat("HH:mm")
+        self.dailyScheduleTimeEdit.setKeyboardTracking(False)
+        self.dailyScheduleTimeEdit.setAccessibleName(self.tr("Scheduled start time"))
+
         # 培养目标
         self.focusWeeklyChallenge = QLabel(self.container)
         self.focusTacetSuppression = QLabel(self.container)
@@ -1865,6 +1872,10 @@ class DailyWidget(ScrollArea):
         self.gridLayout.addWidget(self.startGameCheckBox, row, 1)
         self.gridLayout.addLayout(self.contentBottomLayout, row, 2)
 
+        row += 1
+        self.gridLayout.addWidget(self.dailyScheduleCheckBox, row, 1)
+        self.gridLayout.addWidget(self.dailyScheduleTimeEdit, row, 2, Qt.AlignLeft)
+
         # row += 1
         # self.gridLayout.addLayout(self.contentBottomLayout, row, 2)
 
@@ -1907,6 +1918,11 @@ class DailyWidget(ScrollArea):
             lambda checked: paramConfig.set(paramConfig.pioneerPodcastOpen, checked))
         self.startGameCheckBox.toggled.connect(
             lambda checked: paramConfig.set(paramConfig.startGame, checked))
+        self.dailyScheduleCheckBox.toggled.connect(self.dailyScheduleTimeEdit.setEnabled)
+        self.dailyScheduleCheckBox.toggled.connect(
+            lambda checked: paramConfig.set(paramConfig.dailyScheduleEnabled, checked))
+        self.dailyScheduleTimeEdit.timeChanged.connect(
+            lambda time: paramConfig.set(paramConfig.dailyScheduleTime, time.toString("HH:mm")))
 
         self.weeklyChallengeComboBox.currentIndexChanged.connect(
             lambda _: paramConfig.set(paramConfig.weeklyChallenge, self.weeklyChallengeComboBox.currentData()))
@@ -1950,6 +1966,10 @@ class DailyWidget(ScrollArea):
         self.mailCheckBox.setChecked(paramConfig.get(paramConfig.mailOpen))
         self.pioneerPodcastCheckBox.setChecked(paramConfig.get(paramConfig.pioneerPodcastOpen))
         self.startGameCheckBox.setChecked(paramConfig.get(paramConfig.startGame))
+        self.dailyScheduleTimeEdit.setTime(QTime.fromString(paramConfig.get(paramConfig.dailyScheduleTime), "HH:mm"))
+        scheduled = paramConfig.get(paramConfig.dailyScheduleEnabled)
+        self.dailyScheduleCheckBox.setChecked(scheduled)
+        self.dailyScheduleTimeEdit.setEnabled(scheduled)
         self.multiAccountCheckBox.setChecked(paramConfig.get(paramConfig.dailyMultiAccount))
         self.dailyAccountRows.restore(paramConfig.get(paramConfig.dailyAccountSuffixes),
                                       paramConfig.get(paramConfig.dailyAccountTacetSuppression))
@@ -2043,6 +2063,8 @@ class DailyWidget(ScrollArea):
         self.pioneerPodcastCheckBox.setChecked(False)
 
         self.startGameCheckBox.setChecked(True)
+        self.dailyScheduleCheckBox.setChecked(False)
+        self.dailyScheduleTimeEdit.setTime(QTime.fromString(DEFAULT_DAILY_SCHEDULE_TIME, "HH:mm"))
         self.multiAccountCheckBox.setChecked(False)
         self.dailyAccountRows.restore("", {})
         self.saveDailyAccounts()

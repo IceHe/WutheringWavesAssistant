@@ -74,4 +74,4 @@ def _run_gui():
 
     # 启动qt
     from src.gui.gui import wwa
-    wwa()
+    wwa(server.active_task_names)

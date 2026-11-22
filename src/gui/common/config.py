@@ -9,7 +9,7 @@ from enum import Enum, EnumMeta
 from pathlib import Path
 from typing import List
 
-from PySide6.QtCore import QLocale, QObject, Signal
+from PySide6.QtCore import QLocale, QObject, QTime, Signal
 from qfluentwidgets import (qconfig, QConfig, ConfigItem, OptionsConfigItem, BoolValidator,
                             OptionsValidator, RangeConfigItem, RangeValidator,
                             FolderListValidator, Theme, FolderValidator, ConfigSerializer, EnumSerializer,
@@ -20,6 +20,8 @@ from src.gui.common.boss import BossNameEnum
 from src.gui.common.globals import globalSignal
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_DAILY_SCHEDULE_TIME = "04:05"
 
 
 class Language(Enum):
@@ -152,6 +154,15 @@ class GameFolderValidator(ConfigValidator):
         path = Path(value)
         return str(path.absolute()).replace("\\", "/").replace("\\\\", "/")
 
+class DailyScheduleTimeValidator(ConfigValidator):
+    def correct(self, value):
+        if isinstance(value, str):
+            time = QTime.fromString(value, "HH:mm")
+            if time.isValid():
+                return time.toString("HH:mm")
+        return DEFAULT_DAILY_SCHEDULE_TIME
+
+
 class ParamConfig(QConfig):
     """ Config of parameters """
 
@@ -192,6 +203,9 @@ class ParamConfig(QConfig):
     pioneerPodcast = ConfigItem("Daily", "PioneerPodcast", "Auto")
     pioneerPodcastOpen = ConfigItem("Daily", "PioneerPodcastOpen", False, BoolValidator())
     startGame = ConfigItem("Daily", "StartGame", True, BoolValidator())
+    dailyScheduleEnabled = ConfigItem("Daily", "ScheduleEnabled", False, BoolValidator())
+    dailyScheduleTime = ConfigItem("Daily", "ScheduleTime", DEFAULT_DAILY_SCHEDULE_TIME, DailyScheduleTimeValidator())
+    dailyScheduleLastDate = ConfigItem("Daily", "ScheduleLastDate", "")
     # 培养目标
     focusResonator = ConfigItem("Daily", "FocusResonator", None)
     dailyMultiAccount = ConfigItem("Daily", "MultiAccount", False, BoolValidator())

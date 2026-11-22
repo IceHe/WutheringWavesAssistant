@@ -511,6 +511,18 @@
 <context>
     <name>DailyWidget</name>
     <message>
+        <source>Scheduled daily start</source>
+        <translation>定時開始日常</translation>
+    </message>
+    <message>
+        <source>Keep WWA running to start dailies at the selected local time.</source>
+        <translation>保持 WWA 執行，屆時按電腦本機時間啟動日常。</translation>
+    </message>
+    <message>
+        <source>Scheduled start time</source>
+        <translation>定時啟動時間</translation>
+    </message>
+    <message>
         <source>Multi-account dailies</source>
         <translation>多帳號日常</translation>
     </message>

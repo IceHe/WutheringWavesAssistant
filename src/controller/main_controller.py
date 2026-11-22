@@ -458,6 +458,10 @@ class MainController:
         # 注册订阅
         # self.msg_bus.subscribe(lambda _msg: logger.warning(_msg), source=MsgSource.DAILY_TASK)
 
+    def active_task_names(self) -> frozenset[str]:
+        with self._lock:
+            return frozenset(self.running_tasks)
+
     def execute(self, task_name: str, task_ops: str):
         logger.debug("task_name: %s, task_ops: %s", task_name, task_ops)
         with self._lock:

@@ -89,7 +89,7 @@ def set_foreground_window(w):
         w.activateWindow()
 
 
-def wwa():
+def wwa(active_task_names=None):
     is_exist()
     show_traceback()
 
@@ -116,6 +116,8 @@ def wwa():
 
     # create main window
     w = MainWindow()
+    if active_task_names is not None:
+        w.homeInterface.enableDailyScheduling(active_task_names)
     w.show()
 
     set_foreground_window(w)
