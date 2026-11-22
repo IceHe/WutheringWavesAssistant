@@ -1,6 +1,7 @@
 """Select an already saved game account, independently of daily and combat input."""
 
 import ctypes
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass
@@ -20,10 +21,13 @@ from src.core.pages import GlobalPage, UIOp
 from src.core.resource import Resource
 from src.util import hwnd_util, img_util
 
+logger = logging.getLogger(__name__)
+
 _LOGIN_TEXT = r"^(?:登录|登錄|登入|log\s*in)$"
 _VERIFICATION_TEXT = r"请输入(?:短信)?验证码|安全验证|請輸入驗證碼|security verification|enter.+verification code|captcha"
-_RETURN_TEXT = (r"返回(?:至)?(?:登录|登入|标题|標題)|退出(?:游戏|遊戲|登录)|登出|"
-                r"return to (?:the )?(?:login|title)|exit (?:the )?game|log\s*out")
+_RETURN_ACTION = (r"返回\s*(?:至\s*)?(?:登\s*[录錄入]|标题|標題)(?:界面|畫面)?|"
+                  r"return\s+to\s+(?:the\s+)?(?:log\s*in|title)(?:\s+screen)?")
+_QUIT_GAME = r"退出\s*(?:游戏|遊戲)|(?:exit|quit)\s+(?:the\s+)?game"
 
 
 def _suffix(label, *, masked_only=False):
@@ -119,6 +123,23 @@ class SavedAccountSwitcher:
                 hwnd = child
         control.click_window(hwnd, *point)
 
+    def _return_login_button(self, frame, ocr):
+        height, width = frame.shape[:2]
+        body = BBox(int(width * 0.23), int(height * 0.34), int(width * 0.77), int(height * 0.57))
+        left = BBox(int(width * 0.20), int(height * 0.55), width // 2, int(height * 0.76))
+        right = BBox(width // 2, left.y1, int(width * 0.80), left.y2)
+
+        # The current dialog offers Quit Game and Return to Login as separate actions.
+        if buttons := ocr.search(rf"^\s*(?:{_RETURN_ACTION})\s*$", right):
+            if len(buttons) == 1 and (ocr.search(_QUIT_GAME, body) or ocr.search(rf"^\s*(?:{_QUIT_GAME})\s*$", left)):
+                return buttons[0]
+        # A generic Confirm is safe only when the prompt explicitly says where it returns.
+        if ocr.search(_RETURN_ACTION, body) and ocr.search(self.ctx.tr(I18nText.Cancel), left):
+            confirms = ocr.search(self.ctx.tr(I18nText.Confirm), right) or []
+            if len(confirms) == 1:
+                return confirms[0]
+        return None
+
     def _open_panel(self):
         if panel := self._read_panel():
             return panel
@@ -127,6 +148,8 @@ class SavedAccountSwitcher:
         def terminal_or_title():
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
+            if button := self._return_login_button(frame, ocr):
+                return "return_dialog", button
             if self.pages.isTerminal(ui=ocr):
                 return "terminal", frame
             if self._is_title(ocr):
@@ -139,23 +162,23 @@ class SavedAccountSwitcher:
         reached = self.ui.wait(12, 0.5).until(terminal_or_title)
         if not reached:
             raise RuntimeError("Could not find the game terminal or saved-account screen")
-        page, frame = reached
+        page, target = reached
         if page == "panel":
-            return frame
+            return target
         if page == "terminal":
-            height, width = frame.shape[:2]
+            height, width = target.shape[:2]
             self.ui.click(int(width * 0.04), int(height * 0.96))
 
-            def confirm_return():
-                ocr = self.ctx.ocr_service.query(self.ui.grap())
-                if ocr.search(_RETURN_TEXT) and ocr.search(self.ctx.tr(I18nText.Cancel)):
-                    return ocr.search(self.ctx.tr(I18nText.Confirm))
-                return None
+            def read_return_dialog():
+                frame = self.ui.grap()
+                return self._return_login_button(frame, self.ctx.ocr_service.query(frame))
 
-            confirm = self.ui.sleep(0.5).wait(8, 0.5).until(confirm_return)
-            if not confirm:
-                raise RuntimeError("Could not confirm return to the game login screen")
-            self.ui.click_bbox(confirm)
+            target = self.ui.sleep(0.5).wait(8, 0.5).until(read_return_dialog)
+            if target is None:
+                raise RuntimeError("Could not find the Return to Login button after opening the exit dialog")
+        if page in ("terminal", "return_dialog"):
+            self.ui.click_bbox(target)
+            logger.info("Clicked Return to Login in the game exit dialog")
 
         def panel_or_title_action():
             if panel := self._read_panel():

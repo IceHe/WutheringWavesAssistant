@@ -3,11 +3,15 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, call, patch
 
+import numpy as np
+
 from src.config.config import Config, parse_daily_account_suffixes
 from src.core import tasks
 from src.core.exceptions import StopError
 from src.core.geometry import TextBox
+from src.core.i18n import I18nText, I18nTr, Language
 from src.core.message import MsgTaskStatus, MsgType
+from src.core.pages import OcrResult
 from src.core.runtime import RuntimeConfig
 from src.core.task import TaskFSM
 from src.core.workflow import NodeContext, TaskSpec
@@ -72,6 +76,53 @@ class AccountSelectionTest(unittest.TestCase):
             switcher._click(43, (100, 150))
         control.activate_window.assert_called_once_with(43)
         control.click_window.assert_called_once_with(44, 10, 12)
+
+
+class ReturnToLoginTest(unittest.TestCase):
+    def setUp(self):
+        self.frame = np.zeros((900, 1600, 3), dtype=np.uint8)
+        self.ctx = SimpleNamespace(tr=I18nTr(Language.ZH), ocr_service=Mock())
+        self.switcher = SavedAccountSwitcher(self.ctx)
+        self.ui = self.switcher.ui = Mock()
+        self.ui.grap.return_value = self.frame
+        self.ui.sleep.return_value = self.ui
+        self.ui.wait.return_value.until.side_effect = lambda read: read()
+        self.panel = _AccountPanel(42, None, ())
+        self.switcher._read_panel = Mock(side_effect=[None, self.panel])
+        # The two choices and prompt at the positions observed in the game client.
+        self.quit = TextBox(488, 550, 593, 580, "退出游戏", 1)
+        self.login = TextBox(1000, 550, 1110, 580, "返回登录", 1)
+        self.prompt = TextBox(685, 416, 907, 449, "是否确定退出游戏？", 1)
+        self.exit_dialog = OcrResult([self.quit, self.login, self.prompt])
+
+    def test_terminal_clicks_power_then_return_to_login(self):
+        terminal = OcrResult([TextBox(20, 50, 120, 78, self.ctx.tr(key).raw, 1) for key in (
+            I18nText.Events, I18nText.SOL3Phase, I18nText.UnionLevel, I18nText.UnionEXP,
+        )])
+        self.ctx.ocr_service.query.side_effect = [terminal, self.exit_dialog]
+        self.assertIs(self.switcher._open_panel(), self.panel)
+        self.ui.click.assert_called_once_with(64, 864)
+        self.ui.click_bbox.assert_called_once_with(self.login)
+
+    def test_resumes_when_the_exit_dialog_is_already_open(self):
+        self.ctx.ocr_service.query.return_value = self.exit_dialog
+        self.assertIs(self.switcher._open_panel(), self.panel)
+        self.ui.click_bbox.assert_called_once_with(self.login)
+        self.ui.click.assert_not_called()
+        self.ui.esc.assert_not_called()
+
+    def test_generic_quit_confirmation_cannot_close_game(self):
+        cancel = TextBox(488, 550, 593, 580, "取消", 1)
+        confirm = TextBox(1000, 550, 1110, 580, "确认", 1)
+        result = OcrResult([self.prompt, cancel, confirm])
+        self.assertIsNone(self.switcher._return_login_button(self.frame, result))
+
+        prompt = TextBox(685, 416, 907, 449, "是否返回登录界面？", 1)
+        result = OcrResult([prompt, cancel, confirm])
+        self.assertIs(self.switcher._return_login_button(self.frame, result), confirm)
+
+    def test_ignores_an_isolated_login_label(self):
+        self.assertIsNone(self.switcher._return_login_button(self.frame, OcrResult([self.login])))
 
 
 class DailyAccountRotationTest(unittest.TestCase):
