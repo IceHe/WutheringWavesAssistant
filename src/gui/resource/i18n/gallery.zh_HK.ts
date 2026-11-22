@@ -456,8 +456,8 @@
 <context>
     <name>DailyTask</name>
     <message>
-        <source>Enter at least two different four-digit account suffixes.</source>
-        <translation>請填寫至少兩個不同的四位帳號尾碼。</translation>
+        <source>Enter at least two different four-character account suffixes using letters or digits.</source>
+        <translation>請填寫至少兩個不同的四位帳號尾碼，可用字母和數字。</translation>
     </message>
     <message>
         <location filename="../../view/home/daily.py" line="147"/>
@@ -476,8 +476,8 @@
         <translation>按照填寫順序依次使用遊戲已儲存的帳號完成日常。</translation>
     </message>
     <message>
-        <source>Last 4 digits, separated by commas</source>
-        <translation>帳號尾碼，多個請用逗號分隔</translation>
+        <source>Last 4 letters or digits, separated by commas</source>
+        <translation>四位帳號尾碼，支援字母和數字，請用逗號分隔</translation>
     </message>
     <message>
         <source>Account suffixes</source>

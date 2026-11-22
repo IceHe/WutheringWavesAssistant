@@ -14,6 +14,7 @@ import win32gui
 import win32process
 from pywintypes import error as Win32Error
 
+from src.config.config import ACCOUNT_SUFFIX_PATTERN
 from src.core.exceptions import ScreenshotError
 from src.core.geometry import BBox, TextBox
 from src.core.i18n import I18nText
@@ -30,12 +31,19 @@ _RETURN_ACTION = (r"返回\s*(?:至\s*)?(?:登\s*[录錄入]|标题|標題)(?:�
 _QUIT_GAME = r"退出\s*(?:游戏|遊戲)|(?:exit|quit)\s+(?:the\s+)?game"
 
 
-def _suffix(label, *, masked_only=False):
+def _suffix(label, *, ocr=False, configured=()):
     text = unicodedata.normalize("NFKC", label).strip()
-    if masked_only and not any(mark in text for mark in "*•●"):
+    if not (match := re.search(rf"{ACCOUNT_SUFFIX_PATTERN}\Z", text)):
         return None
-    match = re.fullmatch(r"[+0-9*•●()\-\s]*([0-9]{4})", text)
-    return match[1] if match else None
+    suffix = match[0].upper()
+    if not ocr or any(mark in text for mark in "*•●"):
+        return suffix
+    # QR logins can show an unmasked ID. Reject ordinary UI text on the same panel.
+    if len(text) == 4 and suffix in configured:
+        return suffix
+    if text.isalnum() and not (suffix.isdigit() or suffix.isalpha()):
+        return suffix
+    return None
 
 
 def _message(hwnd, message, wparam=0, lparam=0):
@@ -84,13 +92,14 @@ class _AccountPanel:
 
 
 class SavedAccountSwitcher:
-    def __init__(self, ctx):
+    def __init__(self, ctx, account_suffixes=()):
         self.ctx = ctx
         self.ui = UIOp(ctx)
         self.pages = GlobalPage(ctx)
+        self._account_suffixes = frozenset(account_suffixes)
 
     def enter(self, suffix):
-        """Enter the world only after verifying the selected saved phone suffix."""
+        """Enter the world after verifying the selected saved account suffix."""
         panel = self._open_panel()
         if panel.combo is not None:
             self._select_native(panel.combo, suffix)
@@ -238,7 +247,7 @@ class SavedAccountSwitcher:
                 if not login and hwnd != dropdown_hwnd:
                     continue
                 rows = tuple(sorted((box for box in ocr.results
-                                     if (roi is None or roi.contains_bbox(box)) and _suffix(box.text, masked_only=True)),
+                                     if (roi is None or roi.contains_bbox(box)) and self._ocr_suffix(box.text)),
                                     key=lambda box: box.y1))
                 combo = self._find_combo(hwnd) if hwnd != main else None
                 if combo or rows:
@@ -247,12 +256,12 @@ class SavedAccountSwitcher:
                 continue  # A dialog can disappear between enumeration and capture.
         return None
 
-    @staticmethod
-    def _find_combo(hwnd):
+    def _find_combo(self, hwnd):
         for child in hwnd_util.get_child_hwnds(hwnd):
             if win32gui.GetClassName(child) == "ComboBox" and win32gui.IsWindowVisible(child):
                 try:
-                    if any(_combo_accounts(child)):
+                    suffixes = _combo_accounts(child)
+                    if any(suffixes) and (not self._account_suffixes or not self._account_suffixes.isdisjoint(suffixes)):
                         return child
                 except Win32Error:
                     continue
@@ -283,19 +292,21 @@ class SavedAccountSwitcher:
         if not opened:
             raise RuntimeError("Could not open the saved-account dropdown")
         # The first row is the field, followed by the selectable saved entries.
-        matches = [row for row in opened.rows[1:] if _suffix(row.text, masked_only=True) == suffix]
+        matches = [row for row in opened.rows[1:] if self._ocr_suffix(row.text) == suffix]
         if len(matches) != 1:
             raise RuntimeError(f"Expected one saved account ending in {suffix}, found {len(matches)}")
         self._click(opened.hwnd, matches[0].center)
 
-    @staticmethod
-    def _selected_suffix(panel):
+    def _ocr_suffix(self, label):
+        return _suffix(label, ocr=True, configured=self._account_suffixes)
+
+    def _selected_suffix(self, panel):
         if panel.combo is not None:
             index = _message(panel.combo, win32con.CB_GETCURSEL)
             accounts = _combo_accounts(panel.combo)
             return accounts[index] if 0 <= index < len(accounts) else None
         if len(panel.rows) == 1:
-            return _suffix(panel.rows[0].text, masked_only=True)
+            return self._ocr_suffix(panel.rows[0].text)
         return None
 
     def _enter_world(self):

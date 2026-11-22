@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from enum import StrEnum
 from pathlib import Path
 
@@ -110,12 +111,17 @@ class DailyConfig(ConfigBase):
     accountSuffixes: str = ""
 
 
+ACCOUNT_SUFFIX_PATTERN = r"[A-Za-z0-9]{4}"
+
+
 def parse_daily_account_suffixes(value: str) -> tuple[str, ...]:
-    suffixes = tuple(filter(None, re.split(r"[\s,，、;；]+", value.strip())))
+    text = unicodedata.normalize("NFKC", value).strip()
+    parts = tuple(filter(None, re.split(r"[\s,;、]+", text)))
+    if any(not re.fullmatch(ACCOUNT_SUFFIX_PATTERN, part) for part in parts):
+        raise ValueError("Each account suffix must have four letters or digits.")
+    suffixes = tuple(part.upper() for part in parts)
     if len(suffixes) < 2 or len(set(suffixes)) != len(suffixes):
         raise ValueError("Enter at least two different account suffixes.")
-    if any(not re.fullmatch(r"[0-9]{4}", suffix) for suffix in suffixes):
-        raise ValueError("Each account suffix must have four digits.")
     return suffixes
 
 

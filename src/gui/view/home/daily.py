@@ -141,7 +141,7 @@ class DailyTask(BaseTask):
             try:
                 suffixes = parse_daily_account_suffixes(self.widget.accountSuffixesEdit.text())
             except ValueError:
-                return ValidationResult(False, self.tr("Enter at least two different four-digit account suffixes."))
+                return ValidationResult(False, self.tr("Enter at least two different four-character account suffixes using letters or digits."))
             paramConfig.set(paramConfig.dailyAccountSuffixes, ", ".join(suffixes))
         return ValidationResult(success=True)
 
@@ -1698,7 +1698,7 @@ class DailyWidget(ScrollArea):
         self.multiAccountCheckBox = CheckBox(self.tr("Multi-account dailies"), self.container)
         self.multiAccountCheckBox.setToolTip(self.tr("Run dailies in the listed order using saved game accounts."))
         self.accountSuffixesEdit = LineEdit(self.container)
-        self.accountSuffixesEdit.setPlaceholderText(self.tr("Last 4 digits, separated by commas"))
+        self.accountSuffixesEdit.setPlaceholderText(self.tr("Last 4 letters or digits, separated by commas"))
         self.accountSuffixesEdit.setAccessibleName(self.tr("Account suffixes"))
         self.multiAccountLayout.addWidget(self.multiAccountCheckBox)
         self.multiAccountLayout.addWidget(self.accountSuffixesEdit)

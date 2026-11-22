@@ -610,7 +610,7 @@ def _run_daily_accounts(ctx, suffixes):
     from src.service.daily_workflow import DailyWorkflow
     from src.service.saved_accounts import SavedAccountSwitcher
 
-    switcher = SavedAccountSwitcher(ctx)
+    switcher = SavedAccountSwitcher(ctx, suffixes)
     failed = []
     for index, suffix in enumerate(suffixes, 1):
         if not ctx.runtime.stop_event.is_set():

@@ -16,7 +16,7 @@ from src.core.runtime import RuntimeConfig
 from src.core.task import TaskFSM
 from src.core.workflow import NodeContext, TaskSpec
 from src.service.daily_workflow import endNode
-from src.service.saved_accounts import SavedAccountSwitcher, _AccountPanel
+from src.service.saved_accounts import SavedAccountSwitcher, _AccountPanel, _suffix
 
 
 class AccountSelectionTest(unittest.TestCase):
@@ -49,6 +49,26 @@ class AccountSelectionTest(unittest.TestCase):
         self.pick("1001", "1002")
         self.switcher._click.reset_mock()
         self.pick("1002", "1001")
+
+    def test_qr_login_from_ocr_accepts_a_bare_identifier_and_readback(self):
+        field = self.row("1001", 80)
+        target = TextBox(80, 160, 160, 180, "Ａ12ｂ", 1)
+        self.switcher._open_panel = Mock(return_value=_AccountPanel(42, self.login, (field,)))
+        self.switcher._read_panel = Mock(side_effect=[
+            _AccountPanel(42, None, (field, self.row("1001", 120), target)),
+            _AccountPanel(42, self.login, (TextBox(80, 80, 160, 100, "a12b", 1),)),
+        ])
+        self.switcher.enter("A12B")
+        self.assertEqual(self.switcher._click.call_args_list,
+                         [call(42, field.center), call(42, target.center), call(42, self.login.center)])
+
+    def test_saved_account_suffixes_match_qr_masks_and_ignore_plain_ui_text(self):
+        self.assertEqual(_suffix("扫码用户****a12b", ocr=True), "A12B")
+        self.assertEqual(_suffix("扫码用户a12b", ocr=True), "A12B")
+        self.assertEqual(_suffix("Saved QR account A12B"), "A12B")
+        self.assertEqual(_suffix("abcd", ocr=True, configured={"ABCD"}), "ABCD")
+        self.assertIsNone(_suffix("Help", ocr=True, configured={"ABCD", "A12B"}))
+        self.assertIsNone(_suffix("verification 1001", ocr=True, configured={"1001"}))
 
     def test_wrong_selection_never_submits_login(self):
         with self.assertRaisesRegex(RuntimeError, "Could not verify"):
@@ -212,9 +232,9 @@ class DailyAccountConfigTest(unittest.TestCase):
         self.assertFalse(RuntimeConfig(Config()).daily.multiAccount)
 
     def test_config_preserves_order_and_leading_zero(self):
-        self.assertEqual(parse_daily_account_suffixes("1002， 0001、1003"), ("1002", "0001", "1003"))
+        self.assertEqual(parse_daily_account_suffixes("1002， 0001、a12ｂ,abcd"), ("1002", "0001", "A12B", "ABCD"))
 
     def test_duplicate_or_malformed_suffixes_are_rejected(self):
-        for value in ("", "1001", "1001,1001", "1001,10102", "1001,abcd"):
+        for value in ("", "1001", "1001,1001", "a12b,A12B", "1001,10102", "1001,ab-c"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_daily_account_suffixes(value)
