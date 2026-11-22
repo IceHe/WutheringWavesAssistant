@@ -101,7 +101,7 @@ class DailyAccountRows(QWidget):
                 row.dungeon.addItem(dungeon, userData=dungeon)
                 index = row.dungeon.count() - 1
             row.dungeon.setCurrentIndex(index)
-        row.suffix.editingFinished.connect(self.changed)
+        row.suffix.textChanged.connect(self.changed)
         row.dungeon.currentIndexChanged.connect(self.changed)
         row.remove.clicked.connect(lambda: self._remove_row(row))
         self.rows_layout.addWidget(row)

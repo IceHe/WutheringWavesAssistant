@@ -52,8 +52,10 @@ class DailyAccountRowsTest(unittest.TestCase):
                 second.dungeon.setCurrentIndex(second.dungeon.findData(flames))
                 rows.add_button.click()
                 third = rows._rows()[2]
+                third.suffix.setText("917")
+                self.assertEqual(Config.load(path).daily.accountSuffixes, "6663, 9892")
                 third.suffix.setText("917a")
-                third.suffix.editingFinished.emit()
+                self.assertEqual(Config.load(path).daily.accountSuffixes, "6663, 9892, 917A")
                 app.processEvents()
 
                 event = Mock(source=lambda: third.handle, position=lambda: QPointF(15, first.geometry().top()))
