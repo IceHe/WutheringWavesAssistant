@@ -2279,6 +2279,32 @@ def doNightmarePurification(ctx: NodeContext, local: TaskLocal, **kwargs) -> boo
             fsm.fail()
     return False
 
+_TACET_NEST_PROGRESS = r"(?<!\d)(\d{1,2})\s*[/／]\s*(\d{1,2})(?!\d)"
+
+
+def _read_tacet_nest_card(ctx, ui, content, dungeon_name):
+    if not (titles := ui.search(dungeon_name, content)):
+        return None, None
+
+    title = min(titles, key=lambda box: box.y1)
+    visible_titles = ui.search(ctx.tr(I18nText.TacetDiscordNestTacetDiscordNest), content) or []
+    bottom = min((box.y1 for box in visible_titles if box.y1 >= title.y2), default=content.y2)
+
+    def card_texts(pattern):
+        boxes = ui.search(pattern, content) or []
+        return sorted((box for box in boxes if title.y1 < box.y2 <= bottom), key=lambda box: box.y1)
+
+    buttons = card_texts(ctx.tr([I18nText.Challenge, I18nText.Go]))
+    progress = None
+    for box in card_texts(_TACET_NEST_PROGRESS):
+        if match := re.search(_TACET_NEST_PROGRESS, box.text):
+            defeated, total = map(int, match.groups())
+            if 0 <= defeated <= total and total > 0:
+                progress = defeated, total
+                break
+    return buttons[0] if buttons else None, progress
+
+
 @node(NodeName.doTacetDiscordNest)
 def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
     if local.tacetDiscordNestFSM.is_terminal:
@@ -2286,17 +2312,34 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
     ui = UIOp(ctx)
     roiex = RoiEx(ctx)
+    nest_tab = ctx.tr(I18nText.TacetDiscordNest)
+    nest_filter = ctx.tr(I18nText.SonataSetFilter)
+    nest_titles = ctx.tr(I18nText.TacetDiscordNestTacetDiscordNest)
+    destination_actions = ctx.tr([I18nText.FastTravel, I18nText.EnableNavigation, I18nText.Track])
 
-    # 点击残像聚落
-    if not ui.wait().until(
-            lambda: ui.snapshot().click_text(ctx.tr(I18nText.TacetDiscordNest), roiex.guidebook_menu,
-                                             pk=PointKind.RANDOM, times=2, interval=0.2)
-                    and ui.search(ctx.tr(I18nText.SonataSetFilter), roiex.guidebook_content)):
+    def nest_list_visible():
+        return bool(ui.search(nest_filter, roiex.guidebook_content)
+                    or ui.search(nest_titles, roiex.guidebook_content))
+
+    def open_nest_tab():
+        ui.snapshot()
+        if nest_list_visible():
+            return True
+        if ui.click_text(nest_tab, roiex.guidebook_menu):
+            return ui.sleep(0.3).wait(2).until(lambda: ui.snapshot() and nest_list_visible())
+        return False
+
+    def destination_visible():
+        ui.snapshot()
+        return not ui.search(nest_tab, roiex.guidebook_menu) and bool(ui.search(destination_actions))
+
+    if not ui.wait().until(open_nest_tab):
+        logger.warning("Tacet Discord Nest guidebook tab did not open")
         ui.esc().sleep(1.2)
         return False
 
     ui.sleep(0.3)
-    slider_points = Slider.points(ui.grap())
+    scan_points = (None, *Slider.points(ui.grap()))
 
     # fsm的name = 副本id
     for fsm in local.tacetDiscordNestFSM.children:
@@ -2326,56 +2369,36 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
         try:
             # 滑动寻找入口
             is_start_challenge = False
-            for i, p in enumerate(slider_points):
-                logger.debug(f"Scroll point: {p}")
-                ui.click_point(p, times=2, interval=0.2)
-                ui.sleep(0.2).snapshot()
-
-                # 找副本名
-                if not (dungeon_text := ui.search(dungeon_name, roiex.guidebook_content)):
-                    continue
-                # 找直接挑战
-                challenge_list = ui.search(ctx.tr([I18nText.Challenge, I18nText.Go]), roiex.guidebook_content)
-                if not challenge_list:
-                    continue
-                challenge_list.sort(key=lambda x: x.y1)
-                if dungeon_text[0].y1 > challenge_list[-1].y2:
-                    continue
-                if not (challenge_text := next((cl for cl in challenge_list if dungeon_text[0].y1 < cl.y2), None)):
-                    return _fail()
-                # 当前页面最底下，按钮可能只有一半无法点击，再翻一页
-                if challenge_text.y2 == challenge_list[-1].y2 and i < len(slider_points) - 1:
-                    continue
-
-                # 检查数量进度
-                progress_pattern = r"(\d{1,2}).*?(\d{1,2})"
-                if not (progress_list := ui.search(progress_pattern, roiex.guidebook_content)):
-                    return _fail()
-                progress_list.sort(key=lambda x: x.y1)
-                if not (progress_text := next((pl for pl in progress_list if dungeon_text[0].y1 < pl.y2), None)):
-                    return _fail()
-                match = re.search(progress_pattern, progress_text.text, re.I)
-                logger.debug(f"match: {match}")
-                try:
-                    # 进度已刷满
-                    if int(match.group(1)) == int(match.group(2)):
-                        logger.info(f"{fsm.name}: ⏭️ skip because: {match.group(0)}")
+            for point in scan_points:
+                if point is not None:
+                    ui.click_point(point, times=2, interval=0.2).sleep(0.3)
+                ui.snapshot()
+                button, progress = _read_tacet_nest_card(ctx, ui, roiex.guidebook_content, dungeon_name)
+                if progress:
+                    defeated, total = progress
+                    if defeated == total:
+                        logger.info("%s: ⏭️ skip because: %d/%d", fsm.name, defeated, total)
                         fsm.complete()
                         break
-                except Exception:
-                    pass
-                logger.info(f"{fsm.name}: {match.group(0)}")
+                    logger.info("%s: %d/%d", fsm.name, defeated, total)
+                if button is None:
+                    continue
 
-                # 点击前往
-                ui.sleep(0.2)
+                if progress is None:
+                    logger.info("Progress unreadable for %s, checking the nest in game", dungeon_name.raw)
                 for _ in range(2):
-                    # 若ui太卡，点快了没跳转，再试一次
-                    ui.click_bbox(challenge_text, delay=0.3, times=2, interval=0.1)
-                    if ui.sleep(1).wait(3).until(
-                            lambda: not ui.snapshot().search(ctx.tr(I18nText.TacetDiscordNest), roiex.guidebook_menu)):
+                    ui.click_bbox(button)
+                    if ui.sleep(0.5).wait(3).until(destination_visible):
+                        is_start_challenge = True
                         break
-
-                is_start_challenge = True
+                    if not nest_list_visible():
+                        break
+                    button, _ = _read_tacet_nest_card(ctx, ui, roiex.guidebook_content, dungeon_name)
+                    if button is None:
+                        break
+                if not is_start_challenge:
+                    logger.warning("Tacet Discord Nest destination did not open: %s", dungeon_name.raw)
+                    return _fail()
                 break
 
             # 进度已刷满，刷下一个
@@ -2386,13 +2409,6 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
             if not is_start_challenge:
                 logger.warning(f"Dungeon not found: {dungeon_name.raw}")
                 return _fail()
-
-            # 点击快速旅行
-            if not ui.search(ctx.tr([I18nText.FastTravel, I18nText.EnableNavigation, I18nText.Track])):
-                if not ui.wait().until(
-                        lambda: ui.snapshot().search(
-                            ctx.tr([I18nText.FastTravel, I18nText.EnableNavigation, I18nText.Track]))):
-                    return _fail()
 
             # 检查副本未解锁
             if ui.search(ctx.tr([I18nText.EnableNavigation, I18nText.Track])):
@@ -2606,7 +2622,7 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
             fsm.fail()
         elif fsm.status in [TaskStatus.IN_PROGRESS, TaskStatus.WAITING]:
             fsm.fail()
-    return False
+    return local.tacetDiscordNestFSM.is_finished
 
 
 @node(NodeName.doMail)

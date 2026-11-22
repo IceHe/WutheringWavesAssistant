@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class OKWWCombatSystem:
     def __init__(self, control, images, window, ocr, task_event, *, controls=None, open_world=False):
         template_index()
-        self.control_service = control
+        self._workflow_control = control
         self.img_service = images
         self.is_async = False
         self.auto_pickup = False
@@ -158,7 +158,7 @@ class OKWWCombatSystem:
         if self._task_event is not None and not self._task_event.is_set():
             return False
         if self._special_states is None:
-            self._special_states = CombatSystem(self.control_service, self.img_service)
+            self._special_states = CombatSystem(self._workflow_control, self.img_service)
         hints = list(self.resonators or ())
         for i, name in enumerate(hints):
             if name is None:

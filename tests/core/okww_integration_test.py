@@ -4,15 +4,20 @@ import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
+
+import win32api
+import win32con
 
 from src.config.config import CombatBackend, Config
 from src.core.combat.backend import combat_backend, create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.combat.okww.backend import OKWWCombatSystem
+from src.core.pages import UIOp
 from src.core.runtime import RuntimeConfig
 from src.core.workflow import TaskSpec
 from src.service.combat_service import CombatServiceImpl
+from src.service.control_service import Win32ControlServiceImpl
 
 
 def task_spec(backend=None):
@@ -25,6 +30,37 @@ class CombatSelectionTest(unittest.TestCase):
         context = SimpleNamespace(spec=task_spec())
         self.assertEqual(combat_backend(context.spec), CombatBackend.WWA)
         self.assertIsInstance(create_combat_system(context, Mock(), Mock()), CombatSystem)
+
+    def test_okww_selection_keeps_original_wwa_guidebook_input(self):
+        spec = task_spec("OKWW")
+        event = threading.Event()
+        event.set()
+        window = SimpleNamespace(window=42)
+        context = SimpleNamespace(spec=spec, _container=Mock(window_service=lambda: window),
+                                  runtime=SimpleNamespace(stop_event=event, cfg=RuntimeConfig(spec.user_config)))
+        control = Win32ControlServiceImpl(context, window)
+        context.control_service = control
+        combat = create_combat_system(context, control, Mock())
+
+        with patch("win32gui.PostMessage") as post:
+            context.control_service.guidebook()
+            UIOp(context).click(450, 300)
+            pos = win32api.MAKELONG(450, 300)
+            self.assertEqual(post.call_args_list, [
+                call(42, win32con.WM_KEYDOWN, win32con.VK_F2, 0),
+                call(42, win32con.WM_KEYUP, win32con.VK_F2, 0),
+                call(42, win32con.WM_LBUTTONDOWN, win32con.MK_LBUTTON, pos),
+                call(42, win32con.WM_LBUTTONUP, 0, pos),
+            ])
+            post.reset_mock()
+            combat._runtime._input.key_down("E")
+            combat._runtime._input.key_up("E")
+            scan = (win32api.MapVirtualKey(ord("E"), 0) << 16) | 1
+            self.assertEqual(post.call_args_list, [
+                call(42, win32con.WM_ACTIVATE, win32con.WA_ACTIVE, 0),
+                call(42, win32con.WM_KEYDOWN, ord("E"), scan),
+                call(42, win32con.WM_KEYUP, ord("E"), scan | (3 << 30)),
+            ])
 
     def test_node_legacy_and_combat_service_use_same_task_option(self):
         for node_context in (True, False):
