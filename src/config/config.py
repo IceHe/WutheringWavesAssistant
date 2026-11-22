@@ -3,7 +3,7 @@ import unicodedata
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.config.app_config import AppConfig
 from src.config.echo_config import EchoModel
@@ -110,17 +110,34 @@ class DailyConfig(ConfigBase):
     startGame: bool | None = None
     multiAccount: bool = False
     accountSuffixes: str = ""
+    accountTacetSuppression: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("accountTacetSuppression")
+    @classmethod
+    def normalize_account_tacet_suffixes(cls, overrides: dict[str, str]) -> dict[str, str]:
+        normalized = {normalize_daily_account_suffix(suffix): dungeon for suffix, dungeon in overrides.items()}
+        if len(normalized) != len(overrides):
+            raise ValueError("Account Tacet Field settings contain duplicate suffixes.")
+        return normalized
 
 
 ACCOUNT_SUFFIX_PATTERN = r"[A-Za-z0-9]{4}"
 
 
-def parse_daily_account_suffixes(value: str) -> tuple[str, ...]:
+def split_daily_account_suffixes(value: str) -> tuple[str, ...]:
     text = unicodedata.normalize("NFKC", value).strip()
-    parts = tuple(filter(None, re.split(r"[\s,;、]+", text)))
-    if any(not re.fullmatch(ACCOUNT_SUFFIX_PATTERN, part) for part in parts):
+    return tuple(filter(None, re.split(r"[\s,;、]+", text)))
+
+
+def normalize_daily_account_suffix(value: str) -> str:
+    suffix = unicodedata.normalize("NFKC", value).strip()
+    if not re.fullmatch(ACCOUNT_SUFFIX_PATTERN, suffix):
         raise ValueError("Each account suffix must have four letters or digits.")
-    suffixes = tuple(part.upper() for part in parts)
+    return suffix.upper()
+
+
+def parse_daily_account_suffixes(value: str) -> tuple[str, ...]:
+    suffixes = tuple(normalize_daily_account_suffix(part) for part in split_daily_account_suffixes(value))
     if len(suffixes) < 2 or len(set(suffixes)) != len(suffixes):
         raise ValueError("Enter at least two different account suffixes.")
     return suffixes

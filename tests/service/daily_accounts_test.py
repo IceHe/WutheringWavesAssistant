@@ -168,8 +168,9 @@ class DailyAccountRotationTest(unittest.TestCase):
         self.ctx._container = Mock()
         states = []
 
-        def create(ctx):
+        def create(ctx, *, account_suffix):
             self.assertIsNone(ctx.shared.team_members)
+            self.assertEqual(self.switcher.enter.call_args, call(account_suffix))
             states.append(ctx.shared)
             workflow = Mock()
 
@@ -238,3 +239,37 @@ class DailyAccountConfigTest(unittest.TestCase):
         for value in ("", "1001", "1001,1001", "a12b,A12B", "1001,10102", "1001,ab-c"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_daily_account_suffixes(value)
+
+    def test_workflow_chooses_one_account_field_and_uses_global_fallback(self):
+        from src.service.daily_workflow import DailyWorkflow
+
+        stillness = I18nText.TacetFieldHeartOfStillness
+        flames = I18nText.TacetFieldHeartOfFlames
+        values = {
+            "AccountTacetSuppression": {"6663": stillness, "917a": flames},
+            "TacetSuppression": stillness,
+            "TacetSuppressionOpen": True,
+        }
+        ctx = NodeContext()
+        ctx.runtime.cfg = RuntimeConfig(Config.from_dict({"Daily": values}).to_dict())
+        for suffix, expected in (("6663", stillness), ("917A", flames), ("9892", stillness), (None, stillness)):
+            with self.subTest(suffix=suffix):
+                local = DailyWorkflow(ctx, account_suffix=suffix).local
+                self.assertEqual(local.account_suffix, suffix)
+                self.assertEqual([field.name for field in local.tacetSuppressionFSM.children if field.is_active],
+                                 [expected])
+        for material, target, group in (
+            ("ForgeryChallenge", I18nText.WingfallChasm, "forgeryChallengeFSM"),
+            ("BossChallenge", I18nText.EnemyCalamityEffigy, "bossChallengeFSM"),
+        ):
+            with self.subTest(material=material):
+                settings = dict(values, TacetSuppressionOpen=False)
+                settings[f"{material}Open"] = True
+                settings[material] = target
+                ctx.runtime.cfg = RuntimeConfig(Config.from_dict({"Daily": settings}).to_dict())
+                assigned = DailyWorkflow(ctx, account_suffix="917A").local
+                self.assertFalse(getattr(assigned, group).is_active)
+                self.assertTrue(assigned.tacetSuppressionFSM.is_active)
+                unassigned = DailyWorkflow(ctx, account_suffix="9892").local
+                self.assertTrue(getattr(unassigned, group).is_active)
+                self.assertFalse(unassigned.tacetSuppressionFSM.is_active)

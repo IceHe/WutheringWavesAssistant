@@ -456,13 +456,56 @@
 <context>
     <name>DailyTask</name>
     <message>
-        <source>Enter at least two different four-character account suffixes using letters or digits.</source>
-        <translation>請填寫至少兩個不同的四位帳號尾碼，可用字母和數字。</translation>
-    </message>
-    <message>
         <location filename="../../view/home/daily.py" line="147"/>
         <source>Task: </source>
         <translation>任務: </translation>
+    </message>
+</context>
+<context>
+    <name>DailyAccountRows</name>
+    <message>
+        <source>Add account</source>
+        <translation>新增帳號</translation>
+    </message>
+    <message>
+        <source>Drag to reorder account</source>
+        <translation>拖動調整帳號順序</translation>
+    </message>
+    <message>
+        <source>Account suffix</source>
+        <translation>帳號尾碼</translation>
+    </message>
+    <message>
+        <source>Account Tacet Field</source>
+        <translation>帳號無音區</translation>
+    </message>
+    <message>
+        <source>Remove account</source>
+        <translation>移除帳號</translation>
+    </message>
+    <message>
+        <source>Use global setting</source>
+        <translation>沿用全域設定</translation>
+    </message>
+    <message>
+        <source>Enter an account suffix on row {row}.</source>
+        <translation>請填寫第 {row} 列的帳號尾碼。</translation>
+    </message>
+    <message>
+        <source>Use four letters or digits on row {row}.</source>
+        <translation>第 {row} 列的尾碼須為四位字母或數字。</translation>
+    </message>
+    <message>
+        <source>Account suffix {suffix} is already listed.</source>
+        <translation>帳號尾碼 {suffix} 已存在。</translation>
+    </message>
+    <message>
+        <source>Choose a valid Tacet Field on row {row}.</source>
+        <translation>請為第 {row} 列選擇有效的無音區。</translation>
+    </message>
+    <message>
+        <source>Enter at least two different account suffixes.</source>
+        <translation>請輸入至少兩個不同的帳號尾碼。</translation>
     </message>
 </context>
 <context>
@@ -473,15 +516,7 @@
     </message>
     <message>
         <source>Run dailies in the listed order using saved game accounts.</source>
-        <translation>按照填寫順序依次使用遊戲已儲存的帳號完成日常。</translation>
-    </message>
-    <message>
-        <source>Last 4 letters or digits, separated by commas</source>
-        <translation>四位帳號尾碼，支援字母和數字，請用逗號分隔</translation>
-    </message>
-    <message>
-        <source>Account suffixes</source>
-        <translation>帳號尾碼</translation>
+        <translation>按列表順序依次使用遊戲已儲存的帳號完成日常。</translation>
     </message>
     <message>
         <location filename="../../view/home/daily.py" line="204"/>

@@ -24,7 +24,7 @@ from src.service.common_workflow import (
     query_waveplate_guidebook, query_waveplate_claim_rewards,
     object_detection, search_icon_guidebook, AsyncPickup, RoiEx, Slider, is_white_text, ObjectDetector,
 )
-from src.service.tacet_rewards import open_tacet_reward_dialog
+from src.service.tacet_rewards import TACET_CLAIM_BUTTONS, claim_tacet_double_reward, open_tacet_reward_dialog
 from src.util import img_util
 from src.util.img_sift_util import SIFTFeatureMatcher
 from src.util.img_tile_util import TileGrid
@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 
 class TaskLocal:
 
-    def __init__(self):
+    def __init__(self, account_suffix: str | None = None):
+        self.account_suffix = account_suffix
         ### ------- Guidebook MaterialCollection ForgeryChallenge -------
         self.wingfallChasmFSM: LatchTaskFSM = LatchTaskFSM(name=I18nText.WingfallChasm, count=6)
         self.silentChasmFSM: LatchTaskFSM = LatchTaskFSM(name=I18nText.SilentChasm, count=6)
@@ -1468,6 +1469,8 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
     ui = UIOp(ctx)
     roiex = RoiEx(ctx)
+    account_suffix = local.account_suffix
+    claim_buttons = ctx.tr(TACET_CLAIM_BUTTONS)
 
     # fsm的name = 副本id
     for fsm in local.tacetSuppressionFSM.children:
@@ -1483,6 +1486,7 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
         dungeon_name = ctx.tr(dungeon.id)
         logger.info(f"{dungeon_name.raw}")
         cost = dungeon.waveplate or 60
+        required_waveplate = 2 * cost if account_suffix else cost
 
         def _fail():
             ui.esc().sleep(1.2)
@@ -1492,6 +1496,15 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                 fsm.fail()
                 return True
             return False
+
+        def _finish_account_challenge(succeeded):
+            if not ui.snapshot().click_text(ctx.tr(I18nText.TacetFieldExit), delay=0.3, times=2, interval=0.3):
+                ui.esc().sleep(0.3)  # The daily dispatcher handles the leave-instance confirmation.
+            if succeeded:
+                fsm.complete()
+            else:
+                fsm.fail()
+            return succeeded
 
         try:
             # 点击无音清剿
@@ -1504,9 +1517,15 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
             # 检查体力
             cur_waveplate, waveplate_crystal = query_waveplate_guidebook(ctx)
             if cur_waveplate is None or waveplate_crystal is None:
+                if account_suffix:
+                    logger.warning("Account %s: could not read waveplates before tacet challenge", account_suffix)
+                    fsm.fail()
                 return _fail()
             # 体力不足
-            if cur_waveplate < cost:
+            if cur_waveplate < required_waveplate:
+                if account_suffix:
+                    logger.info("Account %s: skipping tacet challenge with %d/%d waveplates",
+                                account_suffix, cur_waveplate, required_waveplate)
                 fsm.complete()
                 return True
 
@@ -1664,9 +1683,9 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                 # 检查复苏弹窗
                 if ui.search(ctx.tr(I18nText.SelectARevivalItem)):
                     ui.esc().sleep(0.5)
-                elif ui.search(ctx.tr(I18nText.TacetFieldClaim)):
+                elif ui.search(claim_buttons):
                     logger.info("Challenge Complete")
-                    logger.debug(f"Found text: {ctx.tr(I18nText.TacetFieldClaim)}")
+                    logger.debug("Tacet claim dialog already open")
                     ui.sleep(0.3)
                 else:
                     combat_system.exit_special_state(Morph.Prefer)
@@ -1687,11 +1706,32 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
                     # 领取奖励
                     if not use_waypoint and not ui.pick_up(2, 0.2).sleep(0.3).wait().until(
-                            lambda: ui.snapshot().search(ctx.tr(I18nText.TacetFieldClaim))):
+                            lambda: ui.snapshot().search(claim_buttons)):
                         return _fail()
 
                 # 获取体力值
                 cur_waveplate, waveplate_crystal = query_waveplate_claim_rewards(ctx)
+
+                if account_suffix:
+                    if cur_waveplate is None:
+                        logger.warning("Account %s: could not read waveplates at tacet claim", account_suffix)
+                        return _finish_account_challenge(False)
+                    if cur_waveplate < required_waveplate:
+                        logger.info("Account %s: leaving tacet challenge with %d/%d waveplates",
+                                    account_suffix, cur_waveplate, required_waveplate)
+                        return _finish_account_challenge(True)
+                    if not claim_tacet_double_reward(ctx, ui):
+                        return _finish_account_challenge(False)
+                    remaining = cur_waveplate - required_waveplate
+                    logger.info("Account %s: confirmed tacet double claim, %d waveplates remaining",
+                                account_suffix, remaining)
+                    if remaining < required_waveplate:
+                        return _finish_account_challenge(True)
+                    _close_blitz_mode(ui)
+                    if ui.click_text(ctx.tr(I18nText.TacetFieldRestart), delay=0.3):
+                        continue
+                    logger.warning("Account %s: could not restart tacet challenge after claiming", account_suffix)
+                    return _finish_account_challenge(False)
 
                 if cur_waveplate is None or waveplate_crystal is None:
                     return _fail()
@@ -2752,12 +2792,12 @@ def doPioneerPodcast(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
 
 class DailyWorkflow(AbstractWorkflow):
 
-    def __init__(self, ctx: NodeContext):
+    def __init__(self, ctx: NodeContext, *, account_suffix: str | None = None):
         super().__init__(ctx)
 
         self.engine = WorkflowEngine()
         self.fsm = TaskFSM(name="DailyWorkflow")
-        self.local = TaskLocal()
+        self.local = TaskLocal(account_suffix)
 
         self.__init_task_local()
         self.__init_workflow()
@@ -2780,6 +2820,8 @@ class DailyWorkflow(AbstractWorkflow):
         """根据配置初始化任务状态"""
         cfg = self.ctx.runtime.cfg.daily
         logger.debug(f"cfg: {cfg}")
+        tacet_override = cfg.accountTacetSuppression.get(self.local.account_suffix)
+        tacet_id = tacet_override or (cfg.tacetSuppressionId if cfg.tacetSuppressionOpen else None)
 
         # ------- Root -------
         self.local.rootFSM.set_enabled(True)
@@ -2802,10 +2844,10 @@ class DailyWorkflow(AbstractWorkflow):
         self.local.activityWeeklyFSM.set_enabled(cfg.activityOpen and cfg.activityWeeklyOpen)
 
         ## ------- Guidebook MaterialCollection -------
-        self.local.forgeryChallengeFSM.set_enabled(cfg.forgeryChallengeOpen and cfg.forgeryChallenge)
+        self.local.forgeryChallengeFSM.set_enabled(not tacet_override and cfg.forgeryChallengeOpen and cfg.forgeryChallenge)
         self.local.simulationChallengeFSM.set_enabled(cfg.simulationChallengeOpen and cfg.simulationChallenge)
-        self.local.bossChallengeFSM.set_enabled(cfg.bossChallengeOpen and cfg.bossChallenge)
-        self.local.tacetSuppressionFSM.set_enabled(cfg.tacetSuppressionOpen and cfg.tacetSuppression)
+        self.local.bossChallengeFSM.set_enabled(not tacet_override and cfg.bossChallengeOpen and cfg.bossChallenge)
+        self.local.tacetSuppressionFSM.set_enabled(tacet_id is not None)
         self.local.weeklyChallengeFSM.set_enabled(cfg.weeklyChallengeOpen and cfg.weeklyChallenge)
         self.local.nightmarePurificationFSM.set_enabled(cfg.nightmarePurificationOpen and cfg.nightmarePurification)
         self.local.tacetDiscordNestFSM.set_enabled(cfg.tacetDiscordNestOpen and cfg.tacetDiscordNest)
@@ -2864,27 +2906,8 @@ class DailyWorkflow(AbstractWorkflow):
         self.local.enemyLampylumenMyriadFSM.set_enabled(cfg.enemyLampylumenMyriad)
 
         ### ------- Guidebook MaterialCollection TacetSuppression -------
-        self.local.tacetFieldHeartOfStillnessFSM.set_enabled(cfg.tacetFieldHeartOfStillness)
-        self.local.tacetFieldHeartOfFlamesFSM.set_enabled(cfg.tacetFieldHeartOfFlames)
-        self.local.westernFangPeaksTacetFieldFSM.set_enabled(cfg.westernFangPeaksTacetField)
-        self.local.easternXuanPeaksTacetFieldFSM.set_enabled(cfg.easternXuanPeaksTacetField)
-        self.local.tacetFieldSolisiaLandingFSM.set_enabled(cfg.tacetFieldSolisiaLanding)
-        self.local.tacetFieldFrostlandsTransitPortFSM.set_enabled(cfg.tacetFieldFrostlandsTransitPort)
-        self.local.tacetFieldMountGjallarFSM.set_enabled(cfg.tacetFieldMountGjallar)
-        self.local.tacetFieldMawburrowDesertFSM.set_enabled(cfg.tacetFieldMawburrowDesert)
-        self.local.tacetFieldStagnantRunFSM.set_enabled(cfg.tacetFieldStagnantRun)
-        self.local.tacetFieldMournfellCanyonFSM.set_enabled(cfg.tacetFieldMournfellCanyon)
-        self.local.tacetFieldBeohrWatersFSM.set_enabled(cfg.tacetFieldBeohrWaters)
-        self.local.tacetFieldRiccioliIslandsFSM.set_enabled(cfg.tacetFieldRiccioliIslands)
-        self.local.tacetFieldFagaceaePeninsulaFSM.set_enabled(cfg.tacetFieldFagaceaePeninsula)
-        self.local.tacetFieldPenitentsEndFSM.set_enabled(cfg.tacetFieldPenitentsEnd)
-        self.local.tacetFieldCentralPlainsFSM.set_enabled(cfg.tacetFieldCentralPlains)
-        self.local.tacetFieldDesorockHighlandIFSM.set_enabled(cfg.tacetFieldDesorockHighlandI)
-        self.local.tacetFieldTigersMawFSM.set_enabled(cfg.tacetFieldTigersMaw)
-        self.local.tacetFieldWhiningAixsMireFSM.set_enabled(cfg.tacetFieldWhiningAixsMire)
-        self.local.tacetFieldPortCityOfGuixuFSM.set_enabled(cfg.tacetFieldPortCityOfGuixu)
-        self.local.tacetFieldDesorockHighlandIIFSM.set_enabled(cfg.tacetFieldDesorockHighlandII)
-        self.local.tacetFieldDimForestFSM.set_enabled(cfg.tacetFieldDimForest)
+        for challenge in self.local.tacetSuppressionFSM.children:
+            challenge.set_enabled(challenge.name == tacet_id)
 
         ### ------- Guidebook MaterialCollection WeeklyChallenge -------
         self.local.ordinanceOfTheInevitableFSM.set_enabled(cfg.ordinanceOfTheInevitable)

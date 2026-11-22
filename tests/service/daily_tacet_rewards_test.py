@@ -11,7 +11,7 @@ from src.core.exceptions import StopError
 from src.core.geometry import TextBox
 from src.core.i18n import I18nText, I18nTr, Language
 from src.core.runtime import RuntimeConfig
-from src.core.task import LatchTaskFSM, TaskFSMGroup
+from src.core.task import LatchTaskFSM, TaskFSMGroup, TaskStatus
 from src.service import daily_workflow, tacet_rewards
 
 
@@ -68,7 +68,7 @@ class TacetRewardNavigatorTest(unittest.TestCase):
         self.ui.camera_reset.assert_called_once()
         self.ui.pick_up.assert_called_once_with()
         self.assertEqual(self.ui.snapshot.call_args, call())
-        self.assertEqual(self.ui.search.call_args, call(self.ctx.tr(I18nText.TacetFieldClaim)))
+        self.assertEqual(self.ui.search.call_args, call(self.ctx.tr(tacet_rewards.TACET_CLAIM_BUTTONS)))
 
     def test_missing_waypoint_times_out_without_interacting(self):
         self.ui.grap.return_value = self.blank
@@ -84,7 +84,7 @@ class TacetRewardNavigatorTest(unittest.TestCase):
         self.assertTrue(tacet_rewards.open_tacet_reward_dialog(self.ctx, self.ui))
         self.assertEqual(self.control.mock_calls, [])
         self.ui.pick_up.assert_not_called()
-        self.ui.search.assert_called_once_with(self.ctx.tr(I18nText.TacetFieldClaim))
+        self.ui.search.assert_called_once_with(self.ctx.tr(tacet_rewards.TACET_CLAIM_BUTTONS))
 
     def test_cancel_after_ocr_does_not_press_interaction(self):
         self.ui.grap.return_value = self.blank
@@ -112,7 +112,7 @@ class TacetRewardWorkflowTest(unittest.TestCase):
                 snapshot = Config.from_dict({"Daily": daily_settings}).to_dict()
                 runtime = SimpleNamespace(cfg=RuntimeConfig(snapshot))
                 dungeon_task = LatchTaskFSM(name=I18nText.TacetFieldHeartOfStillness)
-                local = SimpleNamespace(tacetSuppressionFSM=TaskFSMGroup(dungeon_task),
+                local = SimpleNamespace(tacetSuppressionFSM=TaskFSMGroup(dungeon_task), account_suffix=None,
                                         doubleDropTacetSuppressionFSM=Mock(is_active=False), members=[])
                 ctx = SimpleNamespace(tr=I18nTr(Language.ZH), control_service=Mock(), img_service=Mock(),
                                       runtime=runtime)
@@ -154,3 +154,112 @@ class TacetRewardWorkflowTest(unittest.TestCase):
                     legacy.assert_called_once_with(ctx, search_reward=True, timeout=25)
                     ui.pick_up.assert_called_once_with(2, 0.2)
                 ui.click_text.assert_any_call(tr(I18nText.TacetFieldClaimX2), delay=0.4)
+
+
+class AccountTacetRewardWorkflowTest(unittest.TestCase):
+    def run_tacet(self, *, initial, reads, outcome="claimed", account_suffix="6663"):
+        local = daily_workflow.TaskLocal(account_suffix)
+        dungeon = local.tacetFieldHeartOfStillnessFSM
+        for challenge in local.tacetSuppressionFSM.children:
+            challenge.set_enabled(challenge is dungeon)
+        runtime = SimpleNamespace(cfg=RuntimeConfig(Config()))
+        ctx = SimpleNamespace(tr=I18nTr(Language.ZH), control_service=Mock(), img_service=Mock(), runtime=runtime)
+        ui = Mock()
+        ui.snapshot.return_value = ui
+        ui.sleep.return_value = ui
+        ui.esc.return_value = ui
+        tr = ctx.tr
+        box = TextBox(400, 120, 500, 140, "test", 1.0)
+        texts = {
+            str(tr(dungeon.name)): [box],
+            str(tr([I18nText.Challenge, I18nText.Go])): [box],
+            str(tr([I18nText.DefeatTheTdsInTheTacetField])): True,
+            str(tr(I18nText.TacetFieldChallengeComplete)): True,
+            str(tr(tacet_rewards.TACET_CLAIM_BUTTONS)): True,
+        }
+        state = None
+
+        def click_text(query, *args, **kwargs):
+            nonlocal state
+            if query == tr(I18nText.TacetFieldClaimX2):
+                state = outcome
+                return outcome != "missing"
+            if query == tr(I18nText.WeeklyCancel):
+                state = None
+                return True
+            if query in (tr(I18nText.TacetFieldExit), tr(I18nText.TacetFieldRestart)):
+                if account_suffix is not None and state != "claimed":
+                    return False
+                state = None
+            return True
+
+        def search(query, *args):
+            if state == "replenish":
+                if query == tr(I18nText.ReplenishWaveplate):
+                    return True
+            if state == "claimed":
+                if query in (tr(I18nText.TacetFieldExit), tr(I18nText.TacetFieldRestart)):
+                    return True
+            return texts.get(str(query))
+
+        ui.click_text.side_effect = click_text
+        ui.search.side_effect = search
+        ui.wait.side_effect = lambda *args, **kwargs: Mock(
+            until=lambda check: check() if kwargs.get("timeout") == 5 else True)
+        combat = Mock()
+        with (
+            patch.object(daily_workflow, "UIOp", return_value=ui),
+            patch.object(daily_workflow, "RoiEx"),
+            patch.object(daily_workflow.Slider, "points", return_value=[object()]),
+            patch.object(daily_workflow, "query_waveplate_guidebook", return_value=(initial, 0)),
+            patch.object(daily_workflow, "query_waveplate_claim_rewards",
+                         side_effect=[(waveplates, 0) for waveplates in reads]),
+            patch.object(daily_workflow, "create_combat_system", return_value=combat),
+        ):
+            daily_workflow.doTacetSuppression(ctx, local)
+        return dungeon.status, ui, tr, combat
+
+    def test_claims_only_increments_of_120_from_current_waveplates(self):
+        for initial, reads in ((119, []), (120, [120]), (180, [180]), (240, [240, 120])):
+            with self.subTest(initial=initial):
+                status, ui, tr, combat = self.run_tacet(initial=initial, reads=reads)
+                self.assertEqual(status, TaskStatus.COMPLETED)
+                self.assertEqual(ui.click_text.call_args_list.count(call(tr(I18nText.TacetFieldClaimX2), delay=0.4)),
+                                 len(reads))
+                self.assertEqual(combat.start.call_count, len(reads))
+                self.assertEqual(ui.click_text.call_args_list.count(call(tr(I18nText.TacetFieldRestart), delay=0.3)),
+                                 max(0, len(reads) - 1))
+                self.assertNotIn(call(tr(I18nText.TacetFieldClaim), delay=0.4), ui.click_text.call_args_list)
+
+    def test_fresh_ocr_blocks_claim_if_waveplates_drop_or_cannot_be_read(self):
+        with self.assertLogs(daily_workflow.__name__, "WARNING"):
+            status, ui, tr, combat = self.run_tacet(initial=None, reads=[])
+        self.assertEqual(status, TaskStatus.FAILED)
+        combat.start.assert_not_called()
+        ui.esc.assert_called_once()
+
+        status, ui, tr, combat = self.run_tacet(initial=120, reads=[119])
+        self.assertEqual(status, TaskStatus.COMPLETED)
+        combat.start.assert_called_once()
+        self.assertNotIn(call(tr(I18nText.TacetFieldClaimX2), delay=0.4), ui.click_text.call_args_list)
+        ui.esc.assert_called_once()
+        with self.assertLogs(daily_workflow.__name__, "WARNING"):
+            status, ui, tr, _ = self.run_tacet(initial=120, reads=[None])
+        self.assertEqual(status, TaskStatus.FAILED)
+        self.assertNotIn(call(tr(I18nText.TacetFieldClaimX2), delay=0.4), ui.click_text.call_args_list)
+
+    def test_unconfirmed_claim_never_retries_or_restarts(self):
+        for outcome in ("unconfirmed", "missing", "replenish"):
+            with self.subTest(outcome=outcome), self.assertLogs(tacet_rewards.__name__, "WARNING"):
+                status, ui, tr, combat = self.run_tacet(initial=240, reads=[240], outcome=outcome)
+                self.assertEqual(status, TaskStatus.FAILED)
+                self.assertEqual(ui.click_text.call_args_list.count(call(tr(I18nText.TacetFieldClaimX2), delay=0.4)), 1)
+                self.assertNotIn(call(tr(I18nText.TacetFieldRestart), delay=0.3), ui.click_text.call_args_list)
+                combat.start.assert_called_once()
+                if outcome == "replenish":
+                    ui.click_text.assert_any_call(tr(I18nText.WeeklyCancel), delay=0.2)
+
+    def test_single_account_can_still_claim_once_with_60(self):
+        status, ui, tr, _ = self.run_tacet(initial=60, reads=[60], account_suffix=None)
+        self.assertEqual(status, TaskStatus.COMPLETED)
+        ui.click_text.assert_any_call(tr(I18nText.TacetFieldClaim), delay=0.4)

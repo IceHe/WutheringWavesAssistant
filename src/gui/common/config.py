@@ -196,6 +196,7 @@ class ParamConfig(QConfig):
     focusResonator = ConfigItem("Daily", "FocusResonator", None)
     dailyMultiAccount = ConfigItem("Daily", "MultiAccount", False, BoolValidator())
     dailyAccountSuffixes = ConfigItem("Daily", "AccountSuffixes", "")
+    dailyAccountTacetSuppression = ConfigItem("Daily", "AccountTacetSuppression", {})
 
     # Explore
     exploreAutoCombat = ConfigItem("Explore", "AutoCombat", False, BoolValidator())

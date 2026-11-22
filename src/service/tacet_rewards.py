@@ -12,6 +12,8 @@ from src.service.common_workflow import RoiEx
 
 logger = logging.getLogger(__name__)
 
+TACET_CLAIM_BUTTONS = [I18nText.TacetFieldClaim, I18nText.TacetFieldClaimX2]
+
 
 class RewardWaypointVision(Vision):
     def __init__(self, frame: np.ndarray):
@@ -39,7 +41,7 @@ def open_tacet_reward_dialog(ctx: NodeContext, ui: UIOp, timeout: float = 25.0) 
     ui.activate()
     deadline = time.monotonic() + timeout
     dialogue = RoiEx(ctx).dialogue
-    claim_text = ctx.tr(I18nText.TacetFieldClaim)
+    claim_text = ctx.tr(TACET_CLAIM_BUTTONS)
     prompt_text = ctx.tr(I18nText.ClaimRewards)
     control = ctx.control_service
     last_direction = None
@@ -93,4 +95,36 @@ def open_tacet_reward_dialog(ctx: NodeContext, ui: UIOp, timeout: float = 25.0) 
         ui.sleep(0.10)
 
     logger.warning("Timed out searching for the tacet reward waypoint")
+    return False
+
+
+def claim_tacet_double_reward(ctx: NodeContext, ui: UIOp) -> bool:
+    """Submit one double claim and wait for the result page before allowing a repeat."""
+    if not ui.snapshot().click_text(ctx.tr(I18nText.TacetFieldClaimX2), delay=0.4):
+        logger.warning("Tacet double claim button was not found")
+        return False
+
+    cancel = ctx.tr(I18nText.WeeklyCancel)
+    replenish = ctx.tr(I18nText.ReplenishWaveplate)
+    reminder = ctx.tr(I18nText.DoNotShowAgain)
+    exit_text = ctx.tr(I18nText.TacetFieldExit)
+    restart = ctx.tr(I18nText.TacetFieldRestart)
+
+    def read_result():
+        ui.snapshot()
+        if ui.search(replenish) or (ui.search(cancel) and ui.search(reminder)):
+            return "replenish"
+        if ui.search(exit_text) and ui.search(restart):
+            return "claimed"
+        return None
+
+    result = ui.sleep(0.3).wait(timeout=5).until(read_result)
+    if result == "claimed":
+        return True
+    if result == "replenish":
+        if not ui.click_text(cancel, delay=0.2):
+            ui.esc()
+        logger.warning("Tacet double claim requested waveplate replenishment")
+    else:
+        logger.warning("Tacet double claim result could not be confirmed")
     return False

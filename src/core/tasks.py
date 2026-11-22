@@ -16,6 +16,7 @@ from src.config import logging_config
 from src.config.config import parse_daily_account_suffixes
 from src.core import message
 from src.core.contexts import Context
+from src.core.dungeon import Dungeon
 from src.core.exceptions import ScreenshotError, StopError
 from src.core.geometry import AnchorPoint, Align
 from src.core.interface import ImgService, OCRService, ControlService, PageEventService, WindowService
@@ -618,7 +619,7 @@ def _run_daily_accounts(ctx, suffixes):
         logger.info("Daily account %d/%d: switching to account ending in %s", index, len(suffixes), suffix)
         switcher.enter(suffix)
         ctx.shared = SharedContext()
-        workflow = DailyWorkflow(ctx)
+        workflow = DailyWorkflow(ctx, account_suffix=suffix)
         workflow.embedding = True
         try:
             succeeded = workflow.execute()
@@ -647,6 +648,10 @@ def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
         if cfg.multiAccount:
             try:
                 suffixes = parse_daily_account_suffixes(cfg.accountSuffixes)
+                for suffix in suffixes:
+                    dungeon_id = cfg.accountTacetSuppression.get(suffix)
+                    if dungeon_id is not None and dungeon_id not in Dungeon.TacetSuppression:
+                        raise ValueError(f"Unknown tacet field {dungeon_id!r} for account ending in {suffix}")
             except ValueError as error:
                 logger.error("Multi-account dailies: %s", error)
                 _report_daily_result(ctx, False)

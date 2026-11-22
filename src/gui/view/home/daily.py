@@ -12,12 +12,11 @@ from qfluentwidgets import (FluentIcon as FIF, OptionsSettingCard, SwitchSetting
                             SettingCardGroup, ScrollArea, ExpandLayout, ExpandSettingCard, FluentIconBase,
                             OptionsConfigItem, CheckBox, ExpandGroupSettingCard, RadioButton, MaskDialogBase,
                             SingleDirectionScrollArea, PrimaryPushButton, FluentStyleSheet,
-                            LineEdit, SettingCard, ComboBox, ConfigItem,
+                            SettingCard, ComboBox, ConfigItem,
                             PushButton, ToolButton, MessageBox, ToggleToolButton, ToolTipFilter,
                             TransparentTogglePushButton, PrimarySplitToolButton, TransparentToggleToolButton,
                             TransparentToolButton)
 
-from src.config.config import parse_daily_account_suffixes
 from src.core.i18n import I18nText
 from src.core.resonator import Resonator
 from src.core.resource import Resource
@@ -26,6 +25,7 @@ from src.gui.common.globals import globalParam, globalSignal
 from src.gui.common.style_sheet import StyleSheet
 from src.gui.common.task import TaskId, BaseTask, ValidationResult
 from src.gui.components.widgets.combo_box import MultiSelectionComboBox
+from src.gui.view.home.daily_account_rows import DailyAccountRows
 
 logger = logging.getLogger(__name__)
 
@@ -139,10 +139,9 @@ class DailyTask(BaseTask):
     def validate(self, **kwargs) -> ValidationResult:
         if self.widget.multiAccountCheckBox.isChecked():
             try:
-                suffixes = parse_daily_account_suffixes(self.widget.accountSuffixesEdit.text())
-            except ValueError:
-                return ValidationResult(False, self.tr("Enter at least two different four-character account suffixes using letters or digits."))
-            paramConfig.set(paramConfig.dailyAccountSuffixes, ", ".join(suffixes))
+                self.widget.saveDailyAccounts(require_minimum=True)
+            except ValueError as error:
+                return ValidationResult(False, str(error))
         return ValidationResult(success=True)
 
     def submitTask(self, start: bool):
@@ -1694,15 +1693,9 @@ class DailyWidget(ScrollArea):
             self.focusResonatorComboBox.addItem(item.name, avatar, userData=item.id)
         self.focusResonatorComboBox.setCurrentIndex(0)
 
-        self.multiAccountLayout = QVBoxLayout()
-        self.multiAccountLayout.setContentsMargins(0, 0, 0, 0)
         self.multiAccountCheckBox = CheckBox(self.tr("Multi-account dailies"), self.container)
         self.multiAccountCheckBox.setToolTip(self.tr("Run dailies in the listed order using saved game accounts."))
-        self.accountSuffixesEdit = LineEdit(self.container)
-        self.accountSuffixesEdit.setPlaceholderText(self.tr("Last 4 letters or digits, separated by commas"))
-        self.accountSuffixesEdit.setAccessibleName(self.tr("Account suffixes"))
-        self.multiAccountLayout.addWidget(self.multiAccountCheckBox)
-        self.multiAccountLayout.addWidget(self.accountSuffixesEdit)
+        self.dailyAccountRows = DailyAccountRows(self.tacetSuppressionList, self.container)
 
         self.buttonGroup = [
             self.tacetSuppressionCheckBox,
@@ -1795,7 +1788,10 @@ class DailyWidget(ScrollArea):
         self.gridLayout.addLayout(self.focusResonatorLayout, row, 3)
 
         row += 1
-        self.gridLayout.addLayout(self.multiAccountLayout, row, 3)
+        self.gridLayout.addWidget(self.multiAccountCheckBox, row, 3)
+
+        row += 1
+        self.gridLayout.addWidget(self.dailyAccountRows, row, 1, 1, 3)
 
         row += 1
         self.gridLayout.addWidget(self.__create_up_label(), row, 0)
@@ -1936,8 +1932,9 @@ class DailyWidget(ScrollArea):
         self.focusResonatorComboBox.currentIndexChanged.connect(self.__onFocusResonatorIndexChanged)
         self.multiAccountCheckBox.toggled.connect(
             lambda checked: paramConfig.set(paramConfig.dailyMultiAccount, checked))
-        self.multiAccountCheckBox.toggled.connect(self.accountSuffixesEdit.setEnabled)
-        self.accountSuffixesEdit.editingFinished.connect(self.__saveAccountSuffixes)
+        self.multiAccountCheckBox.toggled.connect(self.dailyAccountRows.setVisible)
+        self.multiAccountCheckBox.toggled.connect(self.__updateTacetWaypointEnabled)
+        self.dailyAccountRows.changed.connect(self.__onDailyAccountsChanged)
 
         globalSignal.doubleDropSignal.connect(self.__onDoubleDrop)
 
@@ -1948,15 +1945,16 @@ class DailyWidget(ScrollArea):
         self.bossChallengeCheckBox.setChecked(paramConfig.get(paramConfig.bossChallengeOpen))
         self.nightmarePurificationCheckBox.setChecked(paramConfig.get(paramConfig.nightmarePurificationOpen))
         self.tacetSuppressionRewardWaypointCheckBox.setChecked(paramConfig.get(paramConfig.tacetSuppressionRewardWaypoint))
-        self.tacetSuppressionRewardWaypointCheckBox.setEnabled(self.tacetSuppressionCheckBox.isChecked())
         self.tacetDiscordNestCheckBox.setChecked(paramConfig.get(paramConfig.tacetDiscordNestOpen))
         self.activityCheckBox.setChecked(paramConfig.get(paramConfig.activityOpen))
         self.mailCheckBox.setChecked(paramConfig.get(paramConfig.mailOpen))
         self.pioneerPodcastCheckBox.setChecked(paramConfig.get(paramConfig.pioneerPodcastOpen))
         self.startGameCheckBox.setChecked(paramConfig.get(paramConfig.startGame))
         self.multiAccountCheckBox.setChecked(paramConfig.get(paramConfig.dailyMultiAccount))
-        self.accountSuffixesEdit.setText(paramConfig.get(paramConfig.dailyAccountSuffixes))
-        self.accountSuffixesEdit.setEnabled(self.multiAccountCheckBox.isChecked())
+        self.dailyAccountRows.restore(paramConfig.get(paramConfig.dailyAccountSuffixes),
+                                      paramConfig.get(paramConfig.dailyAccountTacetSuppression))
+        self.dailyAccountRows.setVisible(self.multiAccountCheckBox.isChecked())
+        self.__updateTacetWaypointEnabled()
 
         self.weeklyChallengeComboBox.setCurrentIndex(
             self.weeklyChallengeComboBox.findData(paramConfig.get(paramConfig.weeklyChallenge)))
@@ -1990,13 +1988,21 @@ class DailyWidget(ScrollArea):
         if index >= 0:
             self.focusResonatorComboBox.setCurrentIndex(index)
 
-    def __saveAccountSuffixes(self):
-        text = self.accountSuffixesEdit.text().strip()
+    def __onDailyAccountsChanged(self):
         try:
-            suffixes = parse_daily_account_suffixes(text) if text else ()
+            self.saveDailyAccounts()
         except ValueError:
+            # Allow unfinished edits and report the affected row at task startup.
+            pass
+
+    def saveDailyAccounts(self, *, require_minimum=False):
+        suffixes, overrides = self.dailyAccountRows.configuration(require_minimum=require_minimum)
+        if (suffixes, overrides) == (paramConfig.get(paramConfig.dailyAccountSuffixes),
+                                    paramConfig.get(paramConfig.dailyAccountTacetSuppression)):
             return
-        paramConfig.set(paramConfig.dailyAccountSuffixes, ", ".join(suffixes))
+        paramConfig.set(paramConfig.dailyAccountSuffixes, suffixes, save=False)
+        paramConfig.set(paramConfig.dailyAccountTacetSuppression, overrides, save=False)
+        paramConfig.save()
 
     def __onResetButtonClicked(self):
         # 弹窗确认
@@ -2038,8 +2044,8 @@ class DailyWidget(ScrollArea):
 
         self.startGameCheckBox.setChecked(True)
         self.multiAccountCheckBox.setChecked(False)
-        self.accountSuffixesEdit.clear()
-        paramConfig.set(paramConfig.dailyAccountSuffixes, "")
+        self.dailyAccountRows.restore("", {})
+        self.saveDailyAccounts()
 
     def __onCheckboxGroupChanged(self, cb, idx, checked):
         # logger.info(f"onCheckboxGroupChanged: {cb.text()} {checked}")
@@ -2057,7 +2063,11 @@ class DailyWidget(ScrollArea):
             else:
                 self.buttonGroupComboBox[i].setEnabled(True)
                 paramConfig.set(self.buttonGroupOpen[i], False)
-        self.tacetSuppressionRewardWaypointCheckBox.setEnabled(self.tacetSuppressionCheckBox.isChecked())
+        self.__updateTacetWaypointEnabled()
+
+    def __updateTacetWaypointEnabled(self):
+        self.tacetSuppressionRewardWaypointCheckBox.setEnabled(
+            self.tacetSuppressionCheckBox.isChecked() or self.multiAccountCheckBox.isChecked())
 
     def __onNightmarePurificationSelectionChanged(self, indices: set[int]):
         selected = [self.nightmarePurificationComboBox.items[i].userData for i in sorted(indices)]

@@ -67,7 +67,7 @@ class DailyRuntimeConfig:
         self._cfg: DailyConfig = cfg
         self.weeklyChallenge: bool = bool(cfg.weeklyChallenge)
         self.weeklyChallengeOpen: bool = bool(cfg.weeklyChallengeOpen)
-        self.tacetSuppression: bool = bool(cfg.tacetSuppression)
+        self.tacetSuppressionId = cfg.tacetSuppression
         self.tacetSuppressionOpen: bool = bool(cfg.tacetSuppressionOpen)
         self.tacetSuppressionRewardWaypoint = cfg.tacetSuppressionRewardWaypoint
         self.forgeryChallenge: bool = bool(cfg.forgeryChallenge)
@@ -90,9 +90,9 @@ class DailyRuntimeConfig:
         self.startGame: bool = cfg.startGame is None or bool(cfg.startGame)
         self.multiAccount = cfg.multiAccount
         self.accountSuffixes = cfg.accountSuffixes
+        self.accountTacetSuppression = cfg.accountTacetSuppression
 
         self.__init_weeklyChallenge()
-        self.__init_tacetSuppression()
         self.__init_forgeryChallenge()
         self.__init_simulationChallenge()
         self.__init_bossChallenge()
@@ -111,29 +111,6 @@ class DailyRuntimeConfig:
         self.statueOfTheCrownless: bool = self._cfg.weeklyChallenge == I18nText.StatueOfTheCrownless
         self.chaoticJuncture: bool = self._cfg.weeklyChallenge == I18nText.ChaoticJuncture
         self.bellOfArchaicChants: bool = self._cfg.weeklyChallenge == I18nText.BellOfArchaicChants
-
-    def __init_tacetSuppression(self):
-        self.tacetFieldHeartOfStillness: bool = self._cfg.tacetSuppression == I18nText.TacetFieldHeartOfStillness
-        self.tacetFieldHeartOfFlames: bool = self._cfg.tacetSuppression == I18nText.TacetFieldHeartOfFlames
-        self.westernFangPeaksTacetField: bool = self._cfg.tacetSuppression == I18nText.WesternFangPeaksTacetField
-        self.easternXuanPeaksTacetField: bool = self._cfg.tacetSuppression == I18nText.EasternXuanPeaksTacetField
-        self.tacetFieldSolisiaLanding: bool = self._cfg.tacetSuppression == I18nText.TacetFieldSolisiaLanding
-        self.tacetFieldFrostlandsTransitPort: bool = self._cfg.tacetSuppression == I18nText.TacetFieldFrostlandsTransitPort
-        self.tacetFieldMountGjallar: bool = self._cfg.tacetSuppression == I18nText.TacetFieldMountGjallar
-        self.tacetFieldMawburrowDesert: bool = self._cfg.tacetSuppression == I18nText.TacetFieldMawburrowDesert
-        self.tacetFieldStagnantRun: bool = self._cfg.tacetSuppression == I18nText.TacetFieldStagnantRun
-        self.tacetFieldMournfellCanyon: bool = self._cfg.tacetSuppression == I18nText.TacetFieldMournfellCanyon
-        self.tacetFieldBeohrWaters: bool = self._cfg.tacetSuppression == I18nText.TacetFieldBeohrWaters
-        self.tacetFieldRiccioliIslands: bool = self._cfg.tacetSuppression == I18nText.TacetFieldRiccioliIslands
-        self.tacetFieldFagaceaePeninsula: bool = self._cfg.tacetSuppression == I18nText.TacetFieldFagaceaePeninsula
-        self.tacetFieldPenitentsEnd: bool = self._cfg.tacetSuppression == I18nText.TacetFieldPenitentsEnd
-        self.tacetFieldCentralPlains: bool = self._cfg.tacetSuppression == I18nText.TacetFieldCentralPlains
-        self.tacetFieldDesorockHighlandI: bool = self._cfg.tacetSuppression == I18nText.TacetFieldDesorockHighlandI
-        self.tacetFieldTigersMaw: bool = self._cfg.tacetSuppression == I18nText.TacetFieldTigersMaw
-        self.tacetFieldWhiningAixsMire: bool = self._cfg.tacetSuppression == I18nText.TacetFieldWhiningAixsMire
-        self.tacetFieldPortCityOfGuixu: bool = self._cfg.tacetSuppression == I18nText.TacetFieldPortCityOfGuixu
-        self.tacetFieldDesorockHighlandII: bool = self._cfg.tacetSuppression == I18nText.TacetFieldDesorockHighlandII
-        self.tacetFieldDimForest: bool = self._cfg.tacetSuppression == I18nText.TacetFieldDimForest
 
     def __init_forgeryChallenge(self):
         self.wingfallChasm: bool = self._cfg.forgeryChallenge == I18nText.WingfallChasm
