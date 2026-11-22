@@ -87,6 +87,8 @@ class DailyRuntimeConfig:
         self.pioneerPodcast: bool = bool(cfg.pioneerPodcast)
         self.pioneerPodcastOpen: bool = bool(cfg.pioneerPodcastOpen)
         self.startGame: bool = cfg.startGame is None or bool(cfg.startGame)
+        self.multiAccount = cfg.multiAccount
+        self.accountSuffixes = cfg.accountSuffixes
 
         self.__init_weeklyChallenge()
         self.__init_tacetSuppression()

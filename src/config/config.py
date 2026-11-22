@@ -1,3 +1,4 @@
+import re
 from enum import StrEnum
 from pathlib import Path
 
@@ -105,6 +106,17 @@ class DailyConfig(ConfigBase):
     pioneerPodcast: str | None = None
     pioneerPodcastOpen: bool | None = None
     startGame: bool | None = None
+    multiAccount: bool = False
+    accountSuffixes: str = ""
+
+
+def parse_daily_account_suffixes(value: str) -> tuple[str, ...]:
+    suffixes = tuple(filter(None, re.split(r"[\s,，、;；]+", value.strip())))
+    if len(suffixes) < 2 or len(set(suffixes)) != len(suffixes):
+        raise ValueError("Enter at least two different account suffixes.")
+    if any(not re.fullmatch(r"[0-9]{4}", suffix) for suffix in suffixes):
+        raise ValueError("Each account suffix must have four digits.")
+    return suffixes
 
 
 class ExploreConfig(ConfigBase):

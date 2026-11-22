@@ -456,6 +456,10 @@
 <context>
     <name>DailyTask</name>
     <message>
+        <source>Enter at least two different four-digit account suffixes.</source>
+        <translation>請填寫至少兩個不同的四位帳號尾碼。</translation>
+    </message>
+    <message>
         <location filename="../../view/home/daily.py" line="147"/>
         <source>Task: </source>
         <translation>任務: </translation>
@@ -463,6 +467,22 @@
 </context>
 <context>
     <name>DailyWidget</name>
+    <message>
+        <source>Multi-account dailies</source>
+        <translation>多帳號日常</translation>
+    </message>
+    <message>
+        <source>Run dailies in the listed order using saved game accounts.</source>
+        <translation>按照填寫順序依次使用遊戲已儲存的帳號完成日常。</translation>
+    </message>
+    <message>
+        <source>Last 4 digits, separated by commas</source>
+        <translation>帳號尾碼，多個請用逗號分隔</translation>
+    </message>
+    <message>
+        <source>Account suffixes</source>
+        <translation>帳號尾碼</translation>
+    </message>
     <message>
         <location filename="../../view/home/daily.py" line="204"/>
         <source>Waveplates:</source>

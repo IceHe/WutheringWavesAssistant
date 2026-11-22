@@ -193,6 +193,8 @@ class ParamConfig(QConfig):
     startGame = ConfigItem("Daily", "StartGame", True, BoolValidator())
     # 培养目标
     focusResonator = ConfigItem("Daily", "FocusResonator", None)
+    dailyMultiAccount = ConfigItem("Daily", "MultiAccount", False, BoolValidator())
+    dailyAccountSuffixes = ConfigItem("Daily", "AccountSuffixes", "")
 
     # Explore
     exploreAutoCombat = ConfigItem("Explore", "AutoCombat", False, BoolValidator())

@@ -13,6 +13,7 @@ import psutil
 import win32gui
 
 from src.config import logging_config
+from src.config.config import parse_daily_account_suffixes
 from src.core import message
 from src.core.contexts import Context
 from src.core.exceptions import ScreenshotError, StopError
@@ -20,7 +21,7 @@ from src.core.geometry import AnchorPoint, Align
 from src.core.interface import ImgService, OCRService, ControlService, PageEventService, WindowService
 from src.core.message import MsgSource, MsgTaskStatus, MsgType
 from src.core.runtime import RuntimeConfig
-from src.core.workflow import TaskSpec, IPCManager, NodeContext
+from src.core.workflow import TaskSpec, IPCManager, NodeContext, SharedContext
 from src.util import hwnd_util, keymouse_util, file_util
 
 logger = logging.getLogger(__name__)
@@ -599,23 +600,63 @@ class PrepareTask:
             sleep_seconds -= 1
 
 
+def _report_daily_result(ctx, succeeded):
+    ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.SUCCESS if succeeded else MsgTaskStatus.FAILED)
+    ctx.ipc.event_queue.put({"task": {"DailyTask": "finished" if succeeded else "failed"}}, block=True)
+    time.sleep(0.1)
+
+
+def _run_daily_accounts(ctx, suffixes):
+    from src.service.daily_workflow import DailyWorkflow
+    from src.service.saved_accounts import SavedAccountSwitcher
+
+    switcher = SavedAccountSwitcher(ctx)
+    failed = []
+    for index, suffix in enumerate(suffixes, 1):
+        if not ctx.runtime.stop_event.is_set():
+            raise StopError()
+        logger.info("Daily account %d/%d: switching to account ending in %s", index, len(suffixes), suffix)
+        switcher.enter(suffix)
+        ctx.shared = SharedContext()
+        workflow = DailyWorkflow(ctx)
+        workflow.embedding = True
+        try:
+            succeeded = workflow.execute()
+        finally:
+            release_press_key(ctx)
+        if not ctx.runtime.stop_event.is_set():
+            raise StopError()
+        if succeeded:
+            logger.info("Dailies completed for account ending in %s", suffix)
+        else:
+            logger.warning("Dailies failed for account ending in %s", suffix)
+            failed.append(suffix)
+    if failed:
+        logger.warning("Daily rotation finished with failures for: %s", ", ".join(failed))
+    return not failed
+
+
 def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
     try:
 
         ctx, container = task_init(event, spec, ipc, source=MsgSource.DAILY_TASK, **kwargs)
         logger.info(f"每日任务开始运行, task_id: {spec.task_id}")
         ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.RUNNING)
+        cfg = ctx.runtime.cfg.daily
+        suffixes = ()
+        if cfg.multiAccount:
+            try:
+                suffixes = parse_daily_account_suffixes(cfg.accountSuffixes)
+            except ValueError as error:
+                logger.error("Multi-account dailies: %s", error)
+                _report_daily_result(ctx, False)
+                return
 
-        if ctx.runtime.cfg.daily.startGame:
+        if cfg.startGame:
             res = PrepareTask(event, spec, ipc, **kwargs).start_game()
             if not res:
                 logger.warning(f"Failed to start the game")
-                ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.FAILED)
-
-                ctx.ipc.event_queue.put({
-                    "task": {"DailyTask": ["failed"]}
-                }, block=True)
-                time.sleep(0.1)
+                _report_daily_result(ctx, False)
                 return
 
             # 刷新游戏窗口句柄
@@ -642,21 +683,18 @@ def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
         create_mouse_reset_monitor(event, spec, ipc, **kwargs)
 
         try:
-            from src.service.daily_workflow import DailyWorkflow
+            if suffixes:
+                _report_daily_result(ctx, _run_daily_accounts(ctx, suffixes))
+            else:
+                from src.service.daily_workflow import DailyWorkflow
 
-            wf = DailyWorkflow(ctx)
-            wf.execute()
+                DailyWorkflow(ctx).execute()
 
-        except KeyboardInterrupt as e:
-            logger.warning(f"KeyboardInterrupt: {e}")
+        except (KeyboardInterrupt, StopError):
+            logger.info("Daily task stopped")
         except Exception as e:
             logger.exception(e)
-            ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.FAILED)
-
-            ctx.ipc.event_queue.put({
-                "task": {"DailyTask": ["failed"]}
-            }, block=True)
-            time.sleep(0.1)
+            _report_daily_result(ctx, False)
         finally:
             logger.info(f"每日任务结束, task_id: {spec.task_id}")
             release_press_key(ctx)

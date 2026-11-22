@@ -341,20 +341,16 @@ class NodeName:
 
 
 @node(NodeName.endNode)
-def endNode(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
-    if local.rootFSM.is_finished:
+def endNode(ctx: NodeContext, local: TaskLocal, *, embedded=False, **kwargs) -> bool:
+    succeeded = local.rootFSM.is_finished
+    if succeeded:
         ctx.runtime.taskFSM.complete()
-        ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.SUCCESS)
-        ctx.ipc.event_queue.put({
-            "task": {"DailyTask": "finished"}
-        }, block=True)
     else:
         ctx.runtime.taskFSM.fail()
-        ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.FAILED)
-        ctx.ipc.event_queue.put({
-            "task": {"DailyTask": "failed"}
-        }, block=True)
-    time.sleep(0.1)
+    if not embedded:
+        ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.SUCCESS if succeeded else MsgTaskStatus.FAILED)
+        ctx.ipc.event_queue.put({"task": {"DailyTask": "finished" if succeeded else "failed"}}, block=True)
+        time.sleep(0.1)
     return True
 
 
@@ -2767,10 +2763,12 @@ class DailyWorkflow(AbstractWorkflow):
             logger.debug(f"task: {self.__class__.__name__}")
             self.ctx.runtime.taskFSM = self.fsm
             self.fsm.start()
-            self.ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.SUCCESS)
+            if not self.embedding:
+                self.ctx.runtime.send(MsgType.TASK_STATUS, status=MsgTaskStatus.SUCCESS)
             self.ctx.control_service.activate()
             time.sleep(0.1)
-            self.engine.run(self, local=self.local, **kwargs)
+            self.engine.run(self, local=self.local, embedded=self.embedding, **kwargs)
+            return self.fsm.is_finished
         except Exception as e:
             raise e
 

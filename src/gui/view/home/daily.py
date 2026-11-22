@@ -17,6 +17,7 @@ from qfluentwidgets import (FluentIcon as FIF, OptionsSettingCard, SwitchSetting
                             TransparentTogglePushButton, PrimarySplitToolButton, TransparentToggleToolButton,
                             TransparentToolButton)
 
+from src.config.config import parse_daily_account_suffixes
 from src.core.i18n import I18nText
 from src.core.resonator import Resonator
 from src.core.resource import Resource
@@ -136,6 +137,12 @@ class DailyTask(BaseTask):
         self.widget = widget
 
     def validate(self, **kwargs) -> ValidationResult:
+        if self.widget.multiAccountCheckBox.isChecked():
+            try:
+                suffixes = parse_daily_account_suffixes(self.widget.accountSuffixesEdit.text())
+            except ValueError:
+                return ValidationResult(False, self.tr("Enter at least two different four-digit account suffixes."))
+            paramConfig.set(paramConfig.dailyAccountSuffixes, ", ".join(suffixes))
         return ValidationResult(success=True)
 
     def submitTask(self, start: bool):
@@ -1686,6 +1693,16 @@ class DailyWidget(ScrollArea):
             self.focusResonatorComboBox.addItem(item.name, avatar, userData=item.id)
         self.focusResonatorComboBox.setCurrentIndex(0)
 
+        self.multiAccountLayout = QVBoxLayout()
+        self.multiAccountLayout.setContentsMargins(0, 0, 0, 0)
+        self.multiAccountCheckBox = CheckBox(self.tr("Multi-account dailies"), self.container)
+        self.multiAccountCheckBox.setToolTip(self.tr("Run dailies in the listed order using saved game accounts."))
+        self.accountSuffixesEdit = LineEdit(self.container)
+        self.accountSuffixesEdit.setPlaceholderText(self.tr("Last 4 digits, separated by commas"))
+        self.accountSuffixesEdit.setAccessibleName(self.tr("Account suffixes"))
+        self.multiAccountLayout.addWidget(self.multiAccountCheckBox)
+        self.multiAccountLayout.addWidget(self.accountSuffixesEdit)
+
         self.buttonGroup = [
             self.tacetSuppressionCheckBox,
             self.forgeryChallengeCheckBox,
@@ -1775,6 +1792,9 @@ class DailyWidget(ScrollArea):
         # self.gridLayout.addWidget(self.contentTitleLabel, row, 0, 1, 2)
         self.gridLayout.addWidget(self.waveplateLabel, row, 0, 1, 2)
         self.gridLayout.addLayout(self.focusResonatorLayout, row, 3)
+
+        row += 1
+        self.gridLayout.addLayout(self.multiAccountLayout, row, 3)
 
         row += 1
         self.gridLayout.addWidget(self.__create_up_label(), row, 0)
@@ -1908,6 +1928,10 @@ class DailyWidget(ScrollArea):
         self.aboutButton.clicked.connect(self.__showAboutFlyout)
 
         self.focusResonatorComboBox.currentIndexChanged.connect(self.__onFocusResonatorIndexChanged)
+        self.multiAccountCheckBox.toggled.connect(
+            lambda checked: paramConfig.set(paramConfig.dailyMultiAccount, checked))
+        self.multiAccountCheckBox.toggled.connect(self.accountSuffixesEdit.setEnabled)
+        self.accountSuffixesEdit.editingFinished.connect(self.__saveAccountSuffixes)
 
         globalSignal.doubleDropSignal.connect(self.__onDoubleDrop)
 
@@ -1922,6 +1946,9 @@ class DailyWidget(ScrollArea):
         self.mailCheckBox.setChecked(paramConfig.get(paramConfig.mailOpen))
         self.pioneerPodcastCheckBox.setChecked(paramConfig.get(paramConfig.pioneerPodcastOpen))
         self.startGameCheckBox.setChecked(paramConfig.get(paramConfig.startGame))
+        self.multiAccountCheckBox.setChecked(paramConfig.get(paramConfig.dailyMultiAccount))
+        self.accountSuffixesEdit.setText(paramConfig.get(paramConfig.dailyAccountSuffixes))
+        self.accountSuffixesEdit.setEnabled(self.multiAccountCheckBox.isChecked())
 
         self.weeklyChallengeComboBox.setCurrentIndex(
             self.weeklyChallengeComboBox.findData(paramConfig.get(paramConfig.weeklyChallenge)))
@@ -1954,6 +1981,14 @@ class DailyWidget(ScrollArea):
         index = self.focusResonatorComboBox.findData(paramConfig.get(paramConfig.focusResonator))
         if index >= 0:
             self.focusResonatorComboBox.setCurrentIndex(index)
+
+    def __saveAccountSuffixes(self):
+        text = self.accountSuffixesEdit.text().strip()
+        try:
+            suffixes = parse_daily_account_suffixes(text) if text else ()
+        except ValueError:
+            return
+        paramConfig.set(paramConfig.dailyAccountSuffixes, ", ".join(suffixes))
 
     def __onResetButtonClicked(self):
         # 弹窗确认
@@ -1993,6 +2028,9 @@ class DailyWidget(ScrollArea):
         self.pioneerPodcastCheckBox.setChecked(False)
 
         self.startGameCheckBox.setChecked(True)
+        self.multiAccountCheckBox.setChecked(False)
+        self.accountSuffixesEdit.clear()
+        paramConfig.set(paramConfig.dailyAccountSuffixes, "")
 
     def __onCheckboxGroupChanged(self, cb, idx, checked):
         # logger.info(f"onCheckboxGroupChanged: {cb.text()} {checked}")
