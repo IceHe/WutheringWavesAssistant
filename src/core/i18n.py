@@ -375,6 +375,7 @@ class I18nText:
     Revive = "Revive"
     ReplenishWaveplate = "ReplenishWaveplate"
     InternetDisconnecting = "InternetDisconnecting"
+    AccountLoggedInElsewhere = "AccountLoggedInElsewhere"
     PatchingCompletePleaseRestartTheGame = "PatchingCompletePleaseRestartTheGame"
     PatchingCompleteTheGameIsRestarting = "PatchingCompleteTheGameIsRestarting"
     DevicesDriverIsOutdated = "DevicesDriverIsOutdated"
@@ -1867,6 +1868,11 @@ I18N_TEXT = {
     I18nText.InternetDisconnecting: {
         Language.ZH: RegexStr(r"^连接已断开$", raw="连接已断开"),
         Language.EN: RegexStr(flex_ws(r"^Internet Disconnecting$"), raw="Internet Disconnecting"),
+    },
+    I18nText.AccountLoggedInElsewhere: {
+        Language.ZH: RegexStr(r"^\s*账\s*号\s*在\s*别\s*处\s*登\s*录[。！!]?\s*$", raw="账号在别处登录"),
+        Language.EN: RegexStr(flex_ws(r"^(?:Your )?account (?:is |was |has been )?logged in (?:elsewhere|on another device)[.!]?$"),
+                              raw="Account logged in elsewhere"),
     },
     I18nText.PatchingCompletePleaseRestartTheGame: {
         Language.ZH: RegexStr(r"^更新完成.*?请重新启动游戏", raw="更新完成，请重新启动游戏。"),

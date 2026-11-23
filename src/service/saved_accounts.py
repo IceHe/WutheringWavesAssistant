@@ -15,10 +15,10 @@ import win32process
 from pywintypes import error as Win32Error
 
 from src.config.config import ACCOUNT_SUFFIX_PATTERN
-from src.core.exceptions import ScreenshotError
+from src.core.exceptions import AccountLoggedInElsewhere, ScreenshotError
 from src.core.geometry import BBox, TextBox
 from src.core.i18n import I18nText
-from src.core.pages import GlobalPage, UIOp
+from src.core.pages import GlobalPage, UIOp, is_account_logged_in_elsewhere
 from src.core.resource import Resource
 from src.util import hwnd_util, img_util
 
@@ -157,6 +157,8 @@ class SavedAccountSwitcher:
         def terminal_or_title():
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
+            if self._handle_account_disconnect(frame, ocr):
+                return None
             if button := self._return_login_button(frame, ocr):
                 return "return_dialog", button
             if self.pages.handle_login_rewards(ui=self.ui, frame=frame, ocr=ocr):
@@ -182,12 +184,18 @@ class SavedAccountSwitcher:
 
             def read_return_dialog():
                 frame = self.ui.grap()
-                return self._return_login_button(frame, self.ctx.ocr_service.query(frame))
+                ocr = self.ctx.ocr_service.query(frame)
+                if self._handle_account_disconnect(frame, ocr):
+                    return "disconnected", None
+                if button := self._return_login_button(frame, ocr):
+                    return "return_dialog", button
+                return None
 
-            target = self.ui.sleep(0.5).wait(8, 0.5).until(read_return_dialog)
-            if target is None:
+            reached = self.ui.sleep(0.5).wait(8, 0.5).until(read_return_dialog)
+            if not reached:
                 raise RuntimeError("Could not find the Return to Login button after opening the exit dialog")
-        if page in ("terminal", "return_dialog"):
+            page, target = reached
+        if page == "return_dialog":
             self.ui.click_bbox(target)
             logger.info("Clicked Return to Login in the game exit dialog")
 
@@ -196,6 +204,8 @@ class SavedAccountSwitcher:
                 return panel, None
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
+            if self._handle_account_disconnect(frame, ocr):
+                return None
             if self._is_title(ocr):
                 if buttons := ocr.search(self.ctx.tr(I18nText.Account)):
                     return None, buttons[0].center
@@ -314,6 +324,8 @@ class SavedAccountSwitcher:
     def _enter_world(self):
         frame = self.ui.grap()
         ocr = self.ctx.ocr_service.query(frame)
+        if is_account_logged_in_elsewhere(self.ctx, ocr):
+            raise AccountLoggedInElsewhere()
         if self.pages.handle_login_rewards(ui=self.ui, frame=frame, ocr=ocr):
             return False
         if self.ui.is_on_homepage(frame):
@@ -322,3 +334,26 @@ class SavedAccountSwitcher:
             if connect := ocr.search(self.ctx.tr(I18nText.TapToLandInSolaris3)):
                 self.ui.click_bbox(connect).sleep(3)
         return False
+
+    def return_after_disconnect(self):
+        self.ui.activate()
+
+        def login_ready():
+            frame = self.ui.grap()
+            ocr = self.ctx.ocr_service.query(frame)
+            if self._handle_account_disconnect(frame, ocr):
+                return False
+            return self._is_title(ocr) or self._read_panel(frame) is not None
+
+        if not self.ui.wait(30, 0.75).until(login_ready):
+            raise RuntimeError("Could not return to login after the account was logged in elsewhere")
+
+    def _handle_account_disconnect(self, frame, ocr):
+        if not is_account_logged_in_elsewhere(self.ctx, ocr):
+            return False
+        height, width = frame.shape[:2]
+        buttons = BBox(width // 2, height // 2, round(width * 0.80), round(height * 0.75))
+        confirm = ocr.search(self.ctx.tr(I18nText.Confirm), buttons)
+        if confirm and len(confirm) == 1:
+            self.ui.click_bbox(confirm[0], delay=0.2).sleep(0.8)
+        return True

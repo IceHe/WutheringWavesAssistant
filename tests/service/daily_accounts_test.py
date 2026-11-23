@@ -7,16 +7,24 @@ import numpy as np
 
 from src.config.config import Config, parse_daily_account_suffixes
 from src.core import tasks
-from src.core.exceptions import StopError
+from src.core.exceptions import AccountLoggedInElsewhere, StopError
 from src.core.geometry import TextBox
 from src.core.i18n import I18nText, I18nTr, Language
 from src.core.message import MsgTaskStatus, MsgType
-from src.core.pages import OcrResult
+from src.core.pages import OcrQuery, OcrResult
 from src.core.runtime import RuntimeConfig
 from src.core.task import TaskFSM
 from src.core.workflow import NodeContext, TaskSpec
 from src.service.daily_workflow import endNode
 from src.service.saved_accounts import SavedAccountSwitcher, _AccountPanel, _suffix
+
+
+def disconnect_dialog(reason="账号在别处登录"):
+    return OcrResult([
+        TextBox(376, 280, 510, 307, "连接已断开", 1),
+        TextBox(708, 422, 879, 444, reason, 1),
+        TextBox(1026, 553, 1074, 576, "确认", 1),
+    ])
 
 
 class AccountSelectionTest(unittest.TestCase):
@@ -157,6 +165,37 @@ class ReturnToLoginTest(unittest.TestCase):
     def test_ignores_an_isolated_login_label(self):
         self.assertIsNone(self.switcher._return_login_button(self.frame, OcrResult([self.login])))
 
+    def test_account_disconnect_confirms_then_waits_for_title_screen(self):
+        dialog = disconnect_dialog()
+        title = OcrResult([TextBox(20, i * 40, 210, i * 40 + 20, self.ctx.tr(key).raw, 1)
+                           for i, key in enumerate((I18nText.Settings, I18nText.TapToLandInSolaris3))])
+        self.ctx.ocr_service.query.side_effect = [dialog, OcrResult([]), title]
+        self.ui.wait.return_value.until.side_effect = lambda read: read() or read() or read()
+
+        self.switcher.return_after_disconnect()
+
+        self.assertEqual(self.ctx.ocr_service.query.call_count, 3)
+        self.ui.click_bbox.assert_called_once_with(dialog.results[-1], delay=0.2)
+        self.ui.esc.assert_not_called()
+
+    def test_account_disconnect_during_login_takes_precedence_over_homepage(self):
+        self.ctx.ocr_service.query.return_value = disconnect_dialog()
+        self.ui.is_on_homepage.return_value = True
+        with self.assertRaises(AccountLoggedInElsewhere):
+            self.switcher._enter_world()
+        self.ui.click_bbox.assert_not_called()
+
+    def test_kick_while_leaving_previous_account_still_opens_saved_accounts(self):
+        terminal = OcrResult([TextBox(20, 50, 120, 78, self.ctx.tr(key).raw, 1) for key in (
+            I18nText.Events, I18nText.SOL3Phase, I18nText.UnionLevel, I18nText.UnionEXP,
+        )])
+        dialog = disconnect_dialog()
+        self.ctx.ocr_service.query.side_effect = [terminal, dialog]
+
+        self.assertIs(self.switcher._open_panel(), self.panel)
+
+        self.ui.click_bbox.assert_called_once_with(dialog.results[-1], delay=0.2)
+
 
 class DailyAccountRotationTest(unittest.TestCase):
     def setUp(self):
@@ -221,6 +260,35 @@ class DailyAccountRotationTest(unittest.TestCase):
         self.switcher.enter.assert_called_once_with("1001")
         self.create_workflow.assert_not_called()
 
+    def test_kicked_account_stops_before_login_with_next_account(self):
+        first, second = Mock(), Mock()
+        first.execute.side_effect = AccountLoggedInElsewhere()
+        second.execute.return_value = True
+        self.create_workflow.side_effect = [first, second]
+        sequence = Mock()
+        sequence.attach_mock(self.switcher, "switcher")
+        sequence.attach_mock(first, "first")
+        sequence.attach_mock(second, "second")
+        sequence.attach_mock(self.release, "release")
+
+        with self.assertLogs("src.core.tasks", "WARNING"):
+            self.assertFalse(tasks._run_daily_accounts(self.ctx, ("1001", "1002")))
+
+        self.assertEqual(sequence.mock_calls, [
+            call.switcher.enter("1001"), call.first.execute(), call.release(self.ctx),
+            call.switcher.return_after_disconnect(), call.switcher.enter("1002"),
+            call.second.execute(), call.release(self.ctx),
+        ])
+
+    def test_kick_during_login_skips_the_unverified_account(self):
+        self.switcher.enter.side_effect = [AccountLoggedInElsewhere(), None]
+        self.create_workflow.return_value.execute.return_value = True
+        with self.assertLogs("src.core.tasks", "WARNING"):
+            self.assertFalse(tasks._run_daily_accounts(self.ctx, ("1001", "1002")))
+        self.assertEqual(self.switcher.mock_calls,
+                         [call.enter("1001"), call.return_after_disconnect(), call.enter("1002")])
+        self.create_workflow.assert_called_once_with(self.ctx, account_suffix="1002")
+
     def test_stop_releases_controls_and_prevents_next_switch(self):
         def stop():
             self.stop_event.clear()
@@ -239,6 +307,36 @@ class DailyAccountRotationTest(unittest.TestCase):
         self.assertTrue(self.ctx.runtime.taskFSM.is_finished)
         self.ctx.runtime.send.assert_not_called()
         self.ctx.ipc.event_queue.put.assert_not_called()
+
+
+class DailyDisconnectTest(unittest.TestCase):
+    def test_daily_ocr_interrupts_active_combat_only_for_account_disconnect(self):
+        from src.service.daily_workflow import DailyWorkflow
+
+        ctx = NodeContext(_container=Mock())
+        ctx.runtime.cfg = RuntimeConfig(Config().to_dict())
+        ctx.runtime.stop_event = threading.Event()
+        ctx.runtime.stop_event.set()
+        ctx.window_service.tr = I18nTr(Language.ZH)
+        frame = np.zeros((900, 1600, 3), dtype=np.uint8)
+        workflow = DailyWorkflow(ctx, account_suffix="1001")
+        workflow.embedding = True
+        workflow.local.combat_system = Mock()
+        ocr = ctx.ocr_service.query
+
+        def scan_for_dialogs(*args, **kwargs):
+            ocr.return_value = disconnect_dialog("网络连接超时")
+            OcrQuery(ctx).snapshot(img=frame)
+            ocr.return_value = disconnect_dialog()
+            OcrQuery(ctx).snapshot(img=frame)
+
+        with patch.object(workflow.engine, "run", side_effect=scan_for_dialogs):
+            with self.assertRaises(AccountLoggedInElsewhere):
+                workflow.execute()
+        workflow.local.combat_system.stop.assert_called_once_with(join=True)
+        self.assertTrue(workflow.fsm.is_failed)
+        self.assertFalse(ctx.runtime.watch_account_disconnect)
+        OcrQuery(ctx).snapshot(img=frame)
 
 
 class DailyAccountConfigTest(unittest.TestCase):

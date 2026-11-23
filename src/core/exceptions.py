@@ -65,3 +65,7 @@ class StopError(Exception):
     def __init__(self, message="Stopped intentionally"):
         super().__init__(message)
 
+
+class AccountLoggedInElsewhere(StopError):
+    """End the current account's workflow when the game invalidates its session."""
+

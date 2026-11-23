@@ -54,6 +54,7 @@ class RuntimeContext:
     cfg: Optional[RuntimeConfig] = None
     # 由workflow启动后存入
     taskFSM: Optional[TaskFSM] = None
+    watch_account_disconnect: bool = False
 
 
 @dataclass

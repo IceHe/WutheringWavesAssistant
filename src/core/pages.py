@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field, PrivateAttr
 
 from src.core.color import ColorRule, ColorMatch, Color, RuleMode
 from src.core.combat.okww.vision import Vision
-from src.core.exceptions import StopError
+from src.core.exceptions import AccountLoggedInElsewhere, StopError
 from src.core.geometry import TextBox, BBox, Scaler, AnchorBBox, AnchorPoint, Align, PointKind, Point
 from src.core.i18n import Language, I18nText
 from src.core.movement import RouteExecutor, MoveStep
@@ -428,6 +428,11 @@ class Wait:
         return None
 
 
+def is_account_logged_in_elsewhere(ctx, ocr: OcrResult) -> bool:
+    return bool(ocr.search(ctx.tr(I18nText.AccountLoggedInElsewhere))
+                and ocr.search(ctx.tr(I18nText.InternetDisconnecting)))
+
+
 class OcrQuery:
     """ 整合一些常用的Ocr操作，减少重复代码 """
 
@@ -462,6 +467,9 @@ class OcrQuery:
         self._is_query = True
         if not self.ctx.runtime.stop_event.is_set():
             raise StopError()
+        if getattr(self.ctx.runtime, "watch_account_disconnect", False) and is_account_logged_in_elsewhere(
+                self.ctx, self.results):
+            raise AccountLoggedInElsewhere()
         return self
 
     def snapshot(self, roi: Optional[BBox | AnchorBBox] = None, img: Optional[np.ndarray] = None, resize: bool = True) -> "OcrQuery":

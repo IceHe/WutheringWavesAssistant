@@ -17,7 +17,7 @@ from src.config.config import parse_daily_account_suffixes
 from src.core import message
 from src.core.contexts import Context
 from src.core.dungeon import Dungeon
-from src.core.exceptions import ScreenshotError, StopError
+from src.core.exceptions import AccountLoggedInElsewhere, ScreenshotError, StopError
 from src.core.geometry import AnchorPoint, Align
 from src.core.interface import ImgService, OCRService, ControlService, PageEventService, WindowService
 from src.core.message import MsgSource, MsgTaskStatus, MsgType
@@ -617,14 +617,22 @@ def _run_daily_accounts(ctx, suffixes):
         if not ctx.runtime.stop_event.is_set():
             raise StopError()
         logger.info("Daily account %d/%d: switching to account ending in %s", index, len(suffixes), suffix)
-        switcher.enter(suffix)
-        ctx.shared = SharedContext()
-        workflow = DailyWorkflow(ctx, account_suffix=suffix)
-        workflow.embedding = True
         try:
-            succeeded = workflow.execute()
-        finally:
-            release_press_key(ctx)
+            switcher.enter(suffix)
+            ctx.shared = SharedContext()
+            workflow = DailyWorkflow(ctx, account_suffix=suffix)
+            workflow.embedding = True
+            try:
+                succeeded = workflow.execute()
+            finally:
+                release_press_key(ctx)
+        except AccountLoggedInElsewhere:
+            if not ctx.runtime.stop_event.is_set():
+                raise StopError()
+            logger.warning("Account ending in %s logged in elsewhere, skipping its remaining dailies", suffix)
+            failed.append(suffix)
+            switcher.return_after_disconnect()
+            continue
         if not ctx.runtime.stop_event.is_set():
             raise StopError()
         if succeeded:

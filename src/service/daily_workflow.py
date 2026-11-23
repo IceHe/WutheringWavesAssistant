@@ -10,7 +10,7 @@ from src.core.combat.backend import create_combat_system
 from src.core.combat.combat_system import CombatSystem
 from src.core.dungeon import Dungeon
 from src.core.enemy import Enemy, AbsorbMode
-from src.core.exceptions import OcrInferenceError, StopError
+from src.core.exceptions import AccountLoggedInElsewhere, OcrInferenceError, StopError
 from src.core.geometry import AnchorBBox, Align, AnchorPoint, PointKind, Point
 from src.core.i18n import I18nText
 from src.core.message import MsgType, MsgTaskStatus, MsgSource
@@ -36,6 +36,7 @@ class TaskLocal:
 
     def __init__(self, account_suffix: str | None = None):
         self.account_suffix = account_suffix
+        self.combat_system = None
         ### ------- Guidebook MaterialCollection ForgeryChallenge -------
         self.wingfallChasmFSM: LatchTaskFSM = LatchTaskFSM(name=I18nText.WingfallChasm, count=6)
         self.silentChasmFSM: LatchTaskFSM = LatchTaskFSM(name=I18nText.SilentChasm, count=6)
@@ -884,6 +885,7 @@ def doPhantasmaDreamlandRhapsody(ctx: NodeContext, local: TaskLocal, **kwargs) -
     ctx.ipc = ipc
     ctx.runtime.stop_event = event
     ctx.runtime.cfg = RuntimeConfig(spec.user_config)
+    ctx.runtime.watch_account_disconnect = pctx.runtime.watch_account_disconnect
     ctx.runtime.send = message.make_sender(ipc.proc_queue, source, spec.task_id)
 
     ctx._container = container
@@ -912,6 +914,11 @@ def doMaterialCollection(ctx: NodeContext, local: TaskLocal, **kwargs) -> Option
     if local.nightmarePurificationFSM.is_active:
         return I18nText.NightmarePurification
     return None
+
+
+def _create_daily_combat_system(ctx: NodeContext, local: TaskLocal):
+    local.combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+    return local.combat_system
 
 
 @node(NodeName.doForgeryChallenge)
@@ -1066,7 +1073,7 @@ def doForgeryChallenge(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                 ui.pick_up(2, 0.2).sleep(0.3)
 
                 # 打
-                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+                combat_system = _create_daily_combat_system(ctx, local)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = False
@@ -1325,7 +1332,7 @@ def doBossChallenge(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     ctx.control_service.attack()
                     ui.sleep(0.6)
 
-                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+                combat_system = _create_daily_combat_system(ctx, local)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = True
@@ -1640,7 +1647,7 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     return _fail()
 
                 # 直接打，打起来才会有文字提示
-                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+                combat_system = _create_daily_combat_system(ctx, local)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = False
@@ -1935,7 +1942,7 @@ def doWeeklyChallenge(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     ctx.control_service.attack()
                     ui.sleep(0.6)
 
-                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+                combat_system = _create_daily_combat_system(ctx, local)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = True
@@ -2231,7 +2238,7 @@ def doNightmarePurification(ctx: NodeContext, local: TaskLocal, **kwargs) -> boo
                 return False
 
             # 开始战斗
-            combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+            combat_system = _create_daily_combat_system(ctx, local)
             combat_system.set_resonators(local.members, is_print=False)
             combat_system.is_async = True
             combat_system.check_boss_hp = False
@@ -2582,7 +2589,7 @@ def doTacetDiscordNest(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
             for _ in range(3):
                 if cleared:
                     break
-                combat_system = create_combat_system(ctx, ctx.control_service, ctx.img_service)
+                combat_system = _create_daily_combat_system(ctx, local)
                 combat_system.set_resonators(local.members, is_print=False)
                 combat_system.is_async = True
                 combat_system.check_boss_hp = False
@@ -2806,6 +2813,9 @@ class DailyWorkflow(AbstractWorkflow):
         self.__init_workflow()
 
     def execute(self, **kwargs):
+        runtime = self.ctx.runtime
+        watch_account_disconnect = runtime.watch_account_disconnect
+        runtime.watch_account_disconnect = self.local.account_suffix is not None
         try:
             logger.debug(f"task: {self.__class__.__name__}")
             self.ctx.runtime.taskFSM = self.fsm
@@ -2816,8 +2826,14 @@ class DailyWorkflow(AbstractWorkflow):
             time.sleep(0.1)
             self.engine.run(self, local=self.local, embedded=self.embedding, **kwargs)
             return self.fsm.is_finished
-        except Exception as e:
-            raise e
+        except AccountLoggedInElsewhere:
+            if self.local.combat_system is not None:
+                self.local.combat_system.stop(join=True)
+            if not self.fsm.is_terminal:
+                self.fsm.fail()
+            raise
+        finally:
+            runtime.watch_account_disconnect = watch_account_disconnect
 
     def __init_task_local(self):
         """根据配置初始化任务状态"""
