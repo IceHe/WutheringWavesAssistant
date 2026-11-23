@@ -1845,7 +1845,7 @@ I18N_TEXT = {
         Language.EN: RegexStr(flex_ws(r"^Do not show again$"), raw="Do not show again"),
     },
     I18nText.LuniteSubscriptionReward: {
-        Language.ZH: RegexStr(r"点击领取今日月相观测卡奖励", raw="点击领取今日月相观测卡奖励"),
+        Language.ZH: RegexStr(r"[点點][击擊]\s*[领領]取\s*今日\s*月相", raw="点击领取今日月相观测卡奖励"),
         Language.EN: RegexStr(
             flex_ws(r"Tap to claim today|Lunite Subscription reward"),
             raw="Tap to claim today's LuniteSubscription reward"

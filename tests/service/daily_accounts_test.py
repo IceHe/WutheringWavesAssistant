@@ -131,6 +131,19 @@ class ReturnToLoginTest(unittest.TestCase):
         self.ui.click.assert_not_called()
         self.ui.esc.assert_not_called()
 
+    def test_claims_lunite_reward_before_trying_to_return_to_login(self):
+        claim = TextBox(610, 730, 970, 770, "点击领取今日月相观测卡奖励", 1)
+        self.ctx.ocr_service.query.side_effect = [OcrResult([claim]), self.exit_dialog]
+
+        def wait_until(read):
+            return read() or read()
+
+        self.ui.wait.return_value.until.side_effect = wait_until
+        self.assertIs(self.switcher._open_panel(), self.panel)
+        self.ui.click.assert_called_once_with(*claim.center, delay=0.2)
+        self.ui.click_bbox.assert_called_once_with(self.login)
+        self.ui.esc.assert_not_called()
+
     def test_generic_quit_confirmation_cannot_close_game(self):
         cancel = TextBox(488, 550, 593, 580, "取消", 1)
         confirm = TextBox(1000, 550, 1110, 580, "确认", 1)

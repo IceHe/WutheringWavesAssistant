@@ -364,6 +364,9 @@ def globalDispatcher(ctx: NodeContext, local: TaskLocal, **kwargs) -> Optional[s
 
     page = GlobalPage(ctx)
 
+    if page.handle_login_rewards(ui=ui, frame=ui.img):
+        return None
+
     # 已在终端页
     if page.isTerminal(ui=ui):
         return I18nText.Terminal

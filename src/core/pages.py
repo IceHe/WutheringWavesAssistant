@@ -12,6 +12,7 @@ import numpy as np
 from pydantic import BaseModel, Field, PrivateAttr
 
 from src.core.color import ColorRule, ColorMatch, Color, RuleMode
+from src.core.combat.okww.vision import Vision
 from src.core.exceptions import StopError
 from src.core.geometry import TextBox, BBox, Scaler, AnchorBBox, AnchorPoint, Align, PointKind, Point
 from src.core.i18n import Language, I18nText
@@ -794,6 +795,15 @@ class UIOp:
     #     return True
 
 
+class _LuniteRewardVision(Vision):
+    def __init__(self, frame):
+        self.frame = frame[:, :, :3]
+
+    def is_visible(self):
+        region = self.box_of_screen(0.39, 0.48, 0.62, 0.67, hcenter=True, vcenter=True)
+        return self.find_one("monthly_card", box=region, threshold=0.8) is not None
+
+
 class GlobalPage:
 
     Terminal = "Terminal"
@@ -906,15 +916,31 @@ class GlobalPage:
             return self.ActionStr(self.Terminal, None)
         return None
 
-    def isLuniteSubscriptionReward(self, *, ui: UIOp, **kwargs):
+    def handle_login_rewards(self, *, ui: UIOp, frame, ocr: OcrResult | None = None) -> bool:
+        """Handle the daily subscription or the items dialog it opens during login."""
+        query = ui if ocr is None else ocr
+        if query.search(self.ctx.tr(I18nText.ItemsObtained)):
+            close = query.search(self.ctx.tr([I18nText.TapTheBlankAreaToClose, I18nText.TapTheBlankAreaToContinue]))
+            if close:
+                ui.click_bbox(close[0], delay=0.2).sleep(0.5)
+                return True
+        return bool(self.action(ui=ui, key=self.LuniteSubscriptionReward, frame=frame, ocr=ocr))
+
+    def isLuniteSubscriptionReward(self, *, ui: UIOp, frame=None, ocr: OcrResult | None = None, **kwargs):
         """领取每日月卡奖励"""
-        if res := ui.search(self.ctx.tr(I18nText.LuniteSubscriptionReward)):
-            logger.info(f"{self.ctx.tr(I18nText.LuniteSubscriptionReward).raw}")
-            return self.ActionStr(
-                self.LuniteSubscriptionReward,
-                lambda: ui.click_bbox(res, pk=PointKind.NEAR, delay=0.3, times=3, interval=0.4).sleep(0.3)
-            )
-        return None
+        query = ui if ocr is None else ocr
+        if res := query.search(self.ctx.tr(I18nText.LuniteSubscriptionReward)):
+            point = res[0].center
+        elif frame is not None and frame.size and _LuniteRewardVision(frame).is_visible():
+            height, width = frame.shape[:2]
+            point = width // 2, round(height * 0.89)
+        else:
+            return None
+        logger.info("Claiming daily Lunite Subscription reward")
+        return self.ActionStr(
+            self.LuniteSubscriptionReward,
+            lambda: ui.click(*point, delay=0.2).sleep(0.8)
+        )
 
     def isChallengeComplete(self, *, ui: UIOp, **kwargs):
         """挑战完成"""

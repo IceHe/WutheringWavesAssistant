@@ -159,6 +159,8 @@ class SavedAccountSwitcher:
             ocr = self.ctx.ocr_service.query(frame)
             if button := self._return_login_button(frame, ocr):
                 return "return_dialog", button
+            if self.pages.handle_login_rewards(ui=self.ui, frame=frame, ocr=ocr):
+                return None
             if self.pages.isTerminal(ui=ocr):
                 return "terminal", frame
             if self._is_title(ocr):
@@ -311,9 +313,11 @@ class SavedAccountSwitcher:
 
     def _enter_world(self):
         frame = self.ui.grap()
+        ocr = self.ctx.ocr_service.query(frame)
+        if self.pages.handle_login_rewards(ui=self.ui, frame=frame, ocr=ocr):
+            return False
         if self.ui.is_on_homepage(frame):
             return True
-        ocr = self.ctx.ocr_service.query(frame)
         if self._is_title(ocr) and self._read_panel(frame) is None:
             if connect := ocr.search(self.ctx.tr(I18nText.TapToLandInSolaris3)):
                 self.ui.click_bbox(connect).sleep(3)
