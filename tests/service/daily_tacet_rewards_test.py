@@ -64,11 +64,43 @@ class TacetRewardNavigatorTest(unittest.TestCase):
         self.ui.grap.side_effect = frames
         self.ui.search.side_effect = [False] * 5 + [True, True]
         self.assertTrue(tacet_rewards.open_tacet_reward_dialog(self.ctx, self.ui))
-        self.assertEqual(self.control.mock_calls, [call.right(0.18), call.left(0.24), call.up(0.24), call.down(0.24)])
+        self.assertEqual(self.control.mock_calls, [call.right(0.18), call.left(0.24), call.up(0.20), call.down(0.08)])
         self.ui.camera_reset.assert_called_once()
         self.ui.pick_up.assert_called_once_with()
         self.assertEqual(self.ui.snapshot.call_args, call())
         self.assertEqual(self.ui.search.call_args, call(self.ctx.tr(tacet_rewards.TACET_CLAIM_BUTTONS)))
+
+    def test_low_waypoint_near_center_uses_short_backward_step(self):
+        low_right = self.frame_with_waypoint(705, 516)
+        self.ui.grap.side_effect = [low_right, self.blank]
+        self.ui.search.side_effect = [False, True, True]
+
+        self.assertTrue(tacet_rewards.open_tacet_reward_dialog(self.ctx, self.ui))
+
+        self.assertEqual(self.control.mock_calls, [call.down(0.18)])
+        self.ui.pick_up.assert_called_once_with()
+
+    def test_oscillating_waypoint_stops_search_before_timeout(self):
+        left = self.frame_with_waypoint(450, 320)
+        right = self.frame_with_waypoint(750, 320)
+        self.ui.grap.side_effect = [left, right, left, right]
+
+        with self.assertLogs(tacet_rewards.__name__, "WARNING") as logs:
+            self.assertFalse(tacet_rewards.open_tacet_reward_dialog(self.ctx, self.ui))
+
+        self.assertIn("kept reversing", logs.output[-1])
+        self.assertEqual(self.control.mock_calls, [call.left(0.09), call.right(0.08), call.left(0.08)])
+        self.ui.pick_up.assert_not_called()
+
+    def test_stationary_waypoint_stops_search_before_timeout(self):
+        self.ui.grap.return_value = self.frame_with_waypoint(705, 516)
+
+        with self.assertLogs(tacet_rewards.__name__, "WARNING") as logs:
+            self.assertFalse(tacet_rewards.open_tacet_reward_dialog(self.ctx, self.ui))
+
+        self.assertIn("did not move", logs.output[-1])
+        self.assertEqual(self.control.mock_calls, [call.down(0.18)] * 6)
+        self.ui.pick_up.assert_not_called()
 
     def test_missing_waypoint_times_out_without_interacting(self):
         self.ui.grap.return_value = self.blank
@@ -105,9 +137,9 @@ class TacetRewardNavigatorTest(unittest.TestCase):
 
 
 class TacetRewardWorkflowTest(unittest.TestCase):
-    def test_daily_config_selects_navigation_and_preserves_double_claim(self):
-        for waypoint_enabled in (False, True):
-            with self.subTest(waypoint_enabled=waypoint_enabled):
+    def test_daily_selects_navigation_and_retries_before_claiming(self):
+        for waypoint_enabled, retry in ((False, False), (True, False), (True, True)):
+            with self.subTest(waypoint_enabled=waypoint_enabled, retry=retry):
                 daily_settings = {"TacetSuppressionRewardWaypoint": True} if waypoint_enabled else {}
                 snapshot = Config.from_dict({"Daily": daily_settings}).to_dict()
                 runtime = SimpleNamespace(cfg=RuntimeConfig(snapshot))
@@ -128,8 +160,11 @@ class TacetRewardWorkflowTest(unittest.TestCase):
                 for method in (ui.sleep, ui.snapshot, ui.pick_up):
                     method.return_value = ui
                 ui.wait.return_value.until.return_value = True
+                retry_ui = ui.esc.return_value
+                retry_ui.sleep.return_value = retry_ui
+                retry_ui.wait.return_value.until.side_effect = lambda check: check()
                 ui.search.side_effect = lambda query, *args: texts.get(getattr(query, "raw", str(query)))
-                waypoint = Mock(return_value=True)
+                waypoint = Mock(side_effect=[False, True] if retry else [True])
                 legacy = Mock(return_value=True)
                 combat = Mock()
                 cost = daily_workflow.Dungeon.TacetSuppression[dungeon_task.name].waveplate or 60
@@ -144,16 +179,21 @@ class TacetRewardWorkflowTest(unittest.TestCase):
                     patch.object(daily_workflow, "object_detection", legacy),
                 ):
                     self.assertTrue(daily_workflow.doTacetSuppression(ctx, local))
-                combat.stop.assert_called_once_with(join=True)
+                attempts = 2 if retry else 1
+                self.assertEqual(combat.stop.call_args_list, [call(join=True)] * attempts)
                 if waypoint_enabled:
-                    waypoint.assert_called_once_with(ctx, ui)
+                    self.assertEqual(waypoint.call_args_list, [call(ctx, ui)] * attempts)
                     legacy.assert_not_called()
                     ui.pick_up.assert_not_called()
                 else:
                     waypoint.assert_not_called()
                     legacy.assert_called_once_with(ctx, search_reward=True, timeout=25)
                     ui.pick_up.assert_called_once_with(2, 0.2)
-                ui.click_text.assert_any_call(tr(I18nText.TacetFieldClaimX2), delay=0.4)
+                restart = tr(I18nText.Restart)
+                double_claim = tr(I18nText.TacetFieldClaimX2)
+                self.assertEqual([action.args[0] for action in ui.click_text.call_args_list
+                                  if action.args[0] in (restart, double_claim)],
+                                 [restart, double_claim] if retry else [double_claim])
 
 
 class AccountTacetRewardWorkflowTest(unittest.TestCase):

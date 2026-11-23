@@ -1707,6 +1707,7 @@ def doTacetSuppression(ctx: NodeContext, local: TaskLocal, **kwargs) -> bool:
                     found_reward = (open_tacet_reward_dialog(ctx, ui) if use_waypoint else
                                     object_detection(ctx, search_reward=True, timeout=25))
                     if not found_reward:
+                        logger.info("Tacet reward not found; retrying the challenge")
                         if ui.esc().sleep(0.3).wait().until(
                                 lambda: ui.snapshot()
                                         and _close_blitz_mode(ui)
