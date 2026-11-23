@@ -211,6 +211,7 @@ class ParamConfig(QConfig):
     dailyMultiAccount = ConfigItem("Daily", "MultiAccount", False, BoolValidator())
     dailyAccountSuffixes = ConfigItem("Daily", "AccountSuffixes", "")
     dailyAccountTacetSuppression = ConfigItem("Daily", "AccountTacetSuppression", {})
+    dailyAccountTacetDiscordNest = ConfigItem("Daily", "AccountTacetDiscordNest", {})
 
     # Explore
     exploreAutoCombat = ConfigItem("Explore", "AutoCombat", False, BoolValidator())

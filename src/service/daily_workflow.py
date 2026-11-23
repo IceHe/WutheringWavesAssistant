@@ -2870,7 +2870,6 @@ class DailyWorkflow(AbstractWorkflow):
         self.local.tacetSuppressionFSM.set_enabled(tacet_id is not None)
         self.local.weeklyChallengeFSM.set_enabled(cfg.weeklyChallengeOpen and cfg.weeklyChallenge)
         self.local.nightmarePurificationFSM.set_enabled(cfg.nightmarePurificationOpen and cfg.nightmarePurification)
-        self.local.tacetDiscordNestFSM.set_enabled(cfg.tacetDiscordNestOpen and cfg.tacetDiscordNest)
 
         ## ------- Guidebook RecurringChallenges -------
 
@@ -2950,11 +2949,10 @@ class DailyWorkflow(AbstractWorkflow):
         self.local.fallenGraveNightmareNestFSM.set_enabled(cfg.fallenGraveNightmareNest)
 
         ### ------- Guidebook MaterialCollection TacetDiscordNest -------
-        self.local.simulacrumNexusTacetDiscordNestFSM.set_enabled(cfg.simulacrumNexusTacetDiscordNest)
-        self.local.southernYuanHillsTacetDiscordNestFSM.set_enabled(cfg.southernYuanHillsTacetDiscordNest)
-        self.local.starblindCrashsiteTacetDiscordNestFSM.set_enabled(cfg.starblindCrashsiteTacetDiscordNest)
-        self.local.rebirthUplandsTacetDiscordNestFSM.set_enabled(cfg.rebirthUplandsTacetDiscordNest)
-        self.local.stagnantRunTacetDiscordNestFSM.set_enabled(cfg.stagnantRunTacetDiscordNest)
+        nests = cfg.tacet_discord_nests(self.local.account_suffix)
+        self.local.tacetDiscordNestFSM.set_enabled(bool(nests))
+        for nest in self.local.tacetDiscordNestFSM.children:
+            nest.set_enabled(nest.name in nests)
 
         # ---------------------------------------------------------------
 

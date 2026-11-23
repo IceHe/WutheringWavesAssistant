@@ -1702,7 +1702,8 @@ class DailyWidget(ScrollArea):
 
         self.multiAccountCheckBox = CheckBox(self.tr("Multi-account dailies"), self.container)
         self.multiAccountCheckBox.setToolTip(self.tr("Run dailies in the listed order using saved game accounts."))
-        self.dailyAccountRows = DailyAccountRows(self.tacetSuppressionList, self.container)
+        nests = self.tacetDiscordNestMengzhou + self.tacetDiscordNestLahaiRoi
+        self.dailyAccountRows = DailyAccountRows(self.tacetSuppressionList, nests, self.container)
 
         self.buttonGroup = [
             self.tacetSuppressionCheckBox,
@@ -1972,7 +1973,8 @@ class DailyWidget(ScrollArea):
         self.dailyScheduleTimeEdit.setEnabled(scheduled)
         self.multiAccountCheckBox.setChecked(paramConfig.get(paramConfig.dailyMultiAccount))
         self.dailyAccountRows.restore(paramConfig.get(paramConfig.dailyAccountSuffixes),
-                                      paramConfig.get(paramConfig.dailyAccountTacetSuppression))
+                                      paramConfig.get(paramConfig.dailyAccountTacetSuppression),
+                                      paramConfig.get(paramConfig.dailyAccountTacetDiscordNest))
         self.dailyAccountRows.setVisible(self.multiAccountCheckBox.isChecked())
         self.__updateTacetWaypointEnabled()
 
@@ -2016,12 +2018,13 @@ class DailyWidget(ScrollArea):
             pass
 
     def saveDailyAccounts(self, *, require_minimum=False):
-        suffixes, overrides = self.dailyAccountRows.configuration(require_minimum=require_minimum)
-        if (suffixes, overrides) == (paramConfig.get(paramConfig.dailyAccountSuffixes),
-                                    paramConfig.get(paramConfig.dailyAccountTacetSuppression)):
+        items = (paramConfig.dailyAccountSuffixes, paramConfig.dailyAccountTacetSuppression,
+                 paramConfig.dailyAccountTacetDiscordNest)
+        values = self.dailyAccountRows.configuration(require_minimum=require_minimum)
+        if values == tuple(paramConfig.get(item) for item in items):
             return
-        paramConfig.set(paramConfig.dailyAccountSuffixes, suffixes, save=False)
-        paramConfig.set(paramConfig.dailyAccountTacetSuppression, overrides, save=False)
+        for item, value in zip(items, values):
+            paramConfig.set(item, value, save=False)
         paramConfig.save()
 
     def __onResetButtonClicked(self):
@@ -2066,7 +2069,7 @@ class DailyWidget(ScrollArea):
         self.dailyScheduleCheckBox.setChecked(False)
         self.dailyScheduleTimeEdit.setTime(QTime.fromString(DEFAULT_DAILY_SCHEDULE_TIME, "HH:mm"))
         self.multiAccountCheckBox.setChecked(False)
-        self.dailyAccountRows.restore("", {})
+        self.dailyAccountRows.restore("", {}, {})
         self.saveDailyAccounts()
 
     def __onCheckboxGroupChanged(self, cb, idx, checked):

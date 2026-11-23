@@ -2,6 +2,7 @@ import re
 import unicodedata
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -84,6 +85,9 @@ class BossConfig(ConfigBase):
     bossName: list[str] | None = None
 
 
+TacetNestSelection = Literal["All"] | list[str]
+
+
 class DailyConfig(ConfigBase):
     weeklyChallenge: str | None = None
     weeklyChallengeOpen: bool | None = None
@@ -111,13 +115,14 @@ class DailyConfig(ConfigBase):
     multiAccount: bool = False
     accountSuffixes: str = ""
     accountTacetSuppression: dict[str, str] = Field(default_factory=dict)
+    accountTacetDiscordNest: dict[str, TacetNestSelection] = Field(default_factory=dict)
 
-    @field_validator("accountTacetSuppression")
+    @field_validator("accountTacetSuppression", "accountTacetDiscordNest")
     @classmethod
-    def normalize_account_tacet_suffixes(cls, overrides: dict[str, str]) -> dict[str, str]:
-        normalized = {normalize_daily_account_suffix(suffix): dungeon for suffix, dungeon in overrides.items()}
+    def normalize_account_override_suffixes(cls, overrides):
+        normalized = {normalize_daily_account_suffix(suffix): selection for suffix, selection in overrides.items()}
         if len(normalized) != len(overrides):
-            raise ValueError("Account Tacet Field settings contain duplicate suffixes.")
+            raise ValueError("Account settings contain duplicate suffixes.")
         return normalized
 
 

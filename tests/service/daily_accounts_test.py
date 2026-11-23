@@ -399,6 +399,32 @@ class DailyAccountConfigTest(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_daily_account_suffixes(value)
 
+    def test_each_account_dispatches_only_its_selected_nests(self):
+        from src.core.dungeon import Dungeon
+        from src.service.daily_workflow import DailyWorkflow, doMaterialCollection
+
+        simulacrum = I18nText.SimulacrumNexusTacetDiscordNest
+        southern = I18nText.SouthernYuanHillsTacetDiscordNest
+        stagnant = I18nText.StagnantRunTacetDiscordNest
+        overrides = {"1001": "All", "1002": [stagnant], "a12b": [simulacrum, stagnant], "1004": []}
+        ctx = NodeContext()
+        for global_enabled in (True, False):
+            ctx.runtime.cfg = RuntimeConfig(Config.from_dict({"Daily": {
+                "TacetDiscordNest": I18nText.Mengzhou,
+                "TacetDiscordNestOpen": global_enabled,
+                "AccountTacetDiscordNest": overrides,
+            }}).to_dict())
+            inherited = [simulacrum, southern] if global_enabled else []
+            for suffix, expected in (
+                ("1001", list(Dungeon.TacetDiscordNest)), ("1002", [stagnant]),
+                ("A12B", [simulacrum, stagnant]), ("1004", []), ("1005", inherited), (None, inherited),
+            ):
+                with self.subTest(global_enabled=global_enabled, suffix=suffix):
+                    local = DailyWorkflow(ctx, account_suffix=suffix).local
+                    self.assertEqual([nest.name for nest in local.tacetDiscordNestFSM.children if nest.is_active],
+                                     expected)
+                    self.assertEqual(doMaterialCollection(ctx, local), I18nText.TacetDiscordNest if expected else None)
+
     def test_workflow_chooses_one_account_field_and_uses_global_fallback(self):
         from src.service.daily_workflow import DailyWorkflow
 

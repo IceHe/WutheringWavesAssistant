@@ -661,6 +661,12 @@ def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
                     dungeon_id = cfg.accountTacetSuppression.get(suffix)
                     if dungeon_id is not None and dungeon_id not in Dungeon.TacetSuppression:
                         raise ValueError(f"Unknown tacet field {dungeon_id!r} for account ending in {suffix}")
+                    nests = cfg.accountTacetDiscordNest.get(suffix)
+                    if isinstance(nests, list):
+                        unknown_nests = set(nests).difference(Dungeon.TacetDiscordNest)
+                        if unknown_nests:
+                            raise ValueError(f"Unknown tacet discord nests {sorted(unknown_nests)} "
+                                             f"for account ending in {suffix}")
             except ValueError as error:
                 logger.error("Multi-account dailies: %s", error)
                 _report_daily_result(ctx, False)

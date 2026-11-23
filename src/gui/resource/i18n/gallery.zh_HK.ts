@@ -462,7 +462,50 @@
     </message>
 </context>
 <context>
+    <name>_NestSelectionDialog</name>
+    <message>
+        <source>Tacet Discord Nests</source>
+        <translation>殘象聚落</translation>
+    </message>
+    <message>
+        <source>Use global setting</source>
+        <translation>沿用全域設定</translation>
+    </message>
+    <message>
+        <source>Select all</source>
+        <translation>全選</translation>
+    </message>
+    <message>
+        <source>Skip</source>
+        <translation>略過</translation>
+    </message>
+    <message>
+        <source>Save</source>
+        <translation>儲存</translation>
+    </message>
+    <message>
+        <source>Cancel</source>
+        <translation>取消</translation>
+    </message>
+</context>
+<context>
     <name>DailyAccountRows</name>
+    <message>
+        <source>Nests: use global setting</source>
+        <translation>聚落：沿用全域設定</translation>
+    </message>
+    <message>
+        <source>Nests: all</source>
+        <translation>聚落：全選</translation>
+    </message>
+    <message>
+        <source>Nests: skip</source>
+        <translation>聚落：略過</translation>
+    </message>
+    <message>
+        <source>Nests: {count} selected</source>
+        <translation>聚落：已選 {count} 個</translation>
+    </message>
     <message>
         <source>Add account</source>
         <translation>新增帳號</translation>

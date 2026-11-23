@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.config.config import (Config, BossConfig, DailyConfig, GameConfig, SoarToTheBeatConfig, ExploreConfig,
                                ControlsConfig)
+from src.core.dungeon import Dungeon
 from src.core.enemy import EnemyGroup
 from src.core.i18n import I18nText, Language
 from src.util import hwnd_util, winreg_util
@@ -78,8 +79,6 @@ class DailyRuntimeConfig:
         self.bossChallengeOpen: bool = bool(cfg.bossChallengeOpen)
         self.nightmarePurification: bool = bool(cfg.nightmarePurification)
         self.nightmarePurificationOpen: bool = bool(cfg.nightmarePurificationOpen)
-        self.tacetDiscordNest: bool = bool(cfg.tacetDiscordNest)
-        self.tacetDiscordNestOpen: bool = bool(cfg.tacetDiscordNestOpen)
         self.activity: bool = bool(cfg.activity)
         self.activityOpen: bool = bool(cfg.activityOpen)
         self.activityWeeklyOpen: bool = True
@@ -91,13 +90,13 @@ class DailyRuntimeConfig:
         self.multiAccount = cfg.multiAccount
         self.accountSuffixes = cfg.accountSuffixes
         self.accountTacetSuppression = cfg.accountTacetSuppression
+        self.accountTacetDiscordNest = cfg.accountTacetDiscordNest
 
         self.__init_weeklyChallenge()
         self.__init_forgeryChallenge()
         self.__init_simulationChallenge()
         self.__init_bossChallenge()
         self.__init_nightmarePurification()
-        self.__init_tacetDiscordNest()
 
     def __init_weeklyChallenge(self):
         self.ordinanceOfTheInevitable: bool = self._cfg.weeklyChallenge == I18nText.OrdinanceOfTheInevitable
@@ -177,18 +176,21 @@ class DailyRuntimeConfig:
         self.theWastelandsNightmareNest: bool = _all or I18nText.TheWastelandsNightmareNest in nests
         self.fallenGraveNightmareNest: bool = _all or I18nText.FallenGraveNightmareNest in nests
 
-    def __init_tacetDiscordNest(self):
-        _all = "All"
-        self.simulacrumNexusTacetDiscordNest: bool = self._cfg.tacetDiscordNest in [
-            _all, I18nText.Mengzhou, I18nText.SimulacrumNexusTacetDiscordNest]
-        self.southernYuanHillsTacetDiscordNest: bool = self._cfg.tacetDiscordNest in [
-            _all, I18nText.Mengzhou, I18nText.SouthernYuanHillsTacetDiscordNest]
-        self.starblindCrashsiteTacetDiscordNest: bool = self._cfg.tacetDiscordNest in [
-            _all, I18nText.LahaiRoi, I18nText.StarblindCrashsiteTacetDiscordNest]
-        self.rebirthUplandsTacetDiscordNest: bool = self._cfg.tacetDiscordNest in [
-            _all, I18nText.LahaiRoi, I18nText.RebirthUplandsTacetDiscordNest]
-        self.stagnantRunTacetDiscordNest: bool = self._cfg.tacetDiscordNest in [
-            _all, I18nText.LahaiRoi, I18nText.StagnantRunTacetDiscordNest]
+    def tacet_discord_nests(self, account_suffix: str | None) -> set[str]:
+        override = self.accountTacetDiscordNest.get(account_suffix)
+        if override == "All":
+            return set(Dungeon.TacetDiscordNest)
+        if override is not None:
+            return set(override)
+        if not self._cfg.tacetDiscordNestOpen:
+            return set()
+        selection = self._cfg.tacetDiscordNest
+        region = {
+            I18nText.Mengzhou: I18nText.GuidebookMengzhou,
+            I18nText.LahaiRoi: I18nText.GuidebookLahaiRoi,
+        }.get(selection)
+        return {nest.id for nest in Dungeon.TacetDiscordNest.values()
+                if selection == "All" or selection == nest.id or (region and nest.region == region)}
 
     def __repr__(self):
         return f"{self.__class__.__name__}({self.__dict__})"
