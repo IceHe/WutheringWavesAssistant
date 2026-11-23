@@ -1,10 +1,13 @@
 import json
 import os
+import subprocess
 import tempfile
+import threading
 import unittest
+from contextlib import nullcontext
 from datetime import datetime, time
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from src.gui.common.daily_schedule import DailySchedule
 
@@ -57,6 +60,100 @@ class DailyScheduleTest(unittest.TestCase):
         schedule.configure(local_time(24, 8, 1), None)
         self.assertIsNone(schedule.poll(local_time(25, 4, 5), "2026-11-24", submit))
         submit.assert_called_once()
+
+
+class DailyClientStartupTest(unittest.TestCase):
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+
+    def create_installation(self, name):
+        directory = self.root / name / "Wuthering Waves Game"
+        binaries = directory / "Client" / "Binaries" / "Win64"
+        binaries.mkdir(parents=True)
+        (binaries / "Client-Win64-Shipping.exe").touch()
+        executable = directory / "Wuthering Waves.exe"
+        executable.touch()
+        return executable
+
+    def test_auto_cold_start_uses_current_domestic_registration(self):
+        from src.config.config import Config
+        from src.controller.main_controller import TaskMonitor
+        from src.core.runtime import RuntimeConfig
+        from src.util import hwnd_util, winreg_util
+
+        stale = self.root / "Old install"
+        stale.mkdir()
+        (stale / "launcher.exe").touch()
+        domestic = self.create_installation("Current install")
+        overseas = self.create_installation("Overseas")
+        registrations = {
+            ("Aki_G152_default_10003", "SingleLauncherInstallPath"): domestic.parent.parent,
+            ("KRInstall Wuthering Waves", "InstallPath"): stale,
+            ("KRInstall Wuthering Waves Overseas", "InstallPath"): overseas.parent.parent,
+        }
+
+        def query_value(key, name):
+            try:
+                return str(registrations[key, name]), winreg_util.winreg.REG_SZ
+            except KeyError:
+                raise FileNotFoundError(name) from None
+
+        with (
+            patch.object(winreg_util.winreg, "OpenKey", side_effect=lambda hive, key: nullcontext(key.split("\\")[-1])),
+            patch.object(winreg_util.winreg, "QueryValueEx", side_effect=query_value),
+            patch.object(hwnd_util, "get_hwnds", return_value=[]),
+        ):
+            monitor = TaskMonitor.__new__(TaskMonitor)
+            monitor.rt_cfg = RuntimeConfig(Config.from_dict({"Game": {"GamePath": "Auto"}}))
+            self.assertEqual(monitor.get_launch_info().executable, str(domestic))
+            registrations.pop(("Aki_G152_default_10003", "SingleLauncherInstallPath"))
+            monitor.rt_cfg = RuntimeConfig(Config())
+            self.assertEqual(monitor.get_launch_info().executable, str(overseas))
+            registrations.pop(("KRInstall Wuthering Waves Overseas", "InstallPath"))
+            monitor.rt_cfg = RuntimeConfig(Config())
+            self.assertIsNone(monitor.get_launch_info().executable)
+
+    def test_daily_starts_the_client_and_waits_for_its_window(self):
+        from src.core.tasks import PrepareTask
+        from src.core.workflow import LaunchInfo, TaskSpec
+        from src.util import hwnd_util
+
+        executable = self.create_installation("Install")
+        launcher = executable.parent.parent / "launcher.exe"
+        launcher.touch()
+        event = threading.Event()
+        event.set()
+        spec = TaskSpec(game_path=str(launcher), launch_info=LaunchInfo(str(launcher), [str(launcher), "-krqlv=uhd"]))
+        prepare = PrepareTask(event, spec, None)
+        with (
+            patch.object(hwnd_util, "get_hwnd", side_effect=[None, None, 42]) as game_window,
+            patch("src.core.tasks.subprocess.Popen") as spawn,
+            patch.object(prepare, "_sleep") as sleep,
+        ):
+            self.assertTrue(prepare.start_game())
+        spawn.assert_called_once_with(
+            [str(executable), "-krqlv=uhd"], cwd=executable.parent, creationflags=subprocess.DETACHED_PROCESS,
+        )
+        self.assertEqual(game_window.call_args_list[1:], [call(str(executable), force=True)] * 2)
+        self.assertEqual(sleep.call_args_list, [call(2), call(2), call(10)])
+
+    def test_launcher_only_installation_is_not_started(self):
+        from src.core.tasks import PrepareTask
+        from src.core.workflow import TaskSpec
+        from src.util import hwnd_util
+
+        launcher = self.root / "launcher.exe"
+        launcher.touch()
+        event = threading.Event()
+        event.set()
+        spec = TaskSpec(game_path=str(launcher))
+        with (
+            patch.object(hwnd_util, "get_hwnd", return_value=None),
+            patch("src.core.tasks.subprocess.Popen") as spawn,
+            self.assertLogs("src.core.tasks", "ERROR"),
+        ):
+            self.assertFalse(PrepareTask(event, spec, None).start_game())
+        spawn.assert_not_called()
 
 
 class DailyScheduleGuiTest(unittest.TestCase):

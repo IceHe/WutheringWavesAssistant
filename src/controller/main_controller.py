@@ -363,9 +363,10 @@ class TaskMonitor:
     def get_launch_info(self):
         hwnds = hwnd_util.get_hwnds()
         if not hwnds:  # 没有运行中的游戏，则按配置来
-            # exe_path = self.param_config.get_game_path()
-            exe_path = self.rt_cfg.game.gamePath
-            game_path = hwnd_util.get_ww_exe_path(exe_path)
+            executable = self.rt_cfg.game.gamePath
+            if executable is None:
+                return LaunchInfo(None, [])
+            game_path = str(executable)
 
             def _get_qualities():
                 content = Path(game_path).parent / "Client/Content"
@@ -399,7 +400,9 @@ class TaskMonitor:
                 hwnd = hwnds[0]
 
         exe_path, cmdline = hwnd_util.get_process_info_from_hwnd(hwnd)
-        game_path = hwnd_util.get_ww_exe_path(exe_path)
+        game_path = hwnd_util.get_ww_exe_path(exe_path) or exe_path
+        if game_path is None:
+            return LaunchInfo(None, [])
 
         final_cmdline = None
         if cmdline:
@@ -509,16 +512,16 @@ class MainController:
         task_builder = self.tasks.get(task_name)
         kwargs = {}
         task = task_builder.build(args=(event, spec, ipc), kwargs=kwargs, daemon=True)
-        self.running_tasks[task_name] = (task, event, spec, ipc)
-        self.task_monitor = TaskMonitor(self, self.running_tasks.copy(), self.param_config_path, self.gui_win_id)
+        running_task = (task, event, spec, ipc)
+        monitor = TaskMonitor(self, {**self.running_tasks, task_name: running_task}, self.param_config_path, self.gui_win_id)
 
         # logger.info(f"task_id: {spec.task_id}")
         spec.task_name = task_name
         spec.leader_pid = os.getpid()
         spec.gui_win_id = self.gui_win_id
         spec.cli_args = sys.argv
-        spec.game_path = self.task_monitor.game_path
-        spec.launch_info = self.task_monitor.launch_info
+        spec.game_path = monitor.game_path
+        spec.launch_info = monitor.launch_info
         spec.param_config_path = self.param_config_path
         spec.param_config_snapshot = ParamConfig.snapshot(self.param_config_path)
         spec.param_config = ParamConfig.build(content=spec.param_config_snapshot)
@@ -530,7 +533,9 @@ class MainController:
             spec.ocr_use_gpu = False
 
         task.start()
-        self.task_monitor.start()
+        self.running_tasks[task_name] = running_task
+        self.task_monitor = monitor
+        monitor.start()
 
     def _stop_task(self, task_name: str):
         """前端发起任务结束，清理任务数据，关闭监控线程"""

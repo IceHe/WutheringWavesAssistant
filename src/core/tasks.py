@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime
 from multiprocessing import Process
+from pathlib import Path
 from typing import Iterable, Any, TypeVar, Callable, Mapping, Optional
 
 import psutil
@@ -551,40 +552,40 @@ class PrepareTask:
         self.ipc: IPCManager = ipc
 
     def start_game(self):
-        """ 启动游戏 """
+        """Start the game's executable and wait for its window."""
+        if not self.event.is_set():
+            raise StopError()
+        game_path = self.spec.game_path
+        if game_path and hwnd_util.get_hwnd(game_path, force=True):
+            return True
+
+        game_path = hwnd_util.get_ww_exe_path(game_path)
+        if game_path is None:
+            logger.error("Game client executable not found. Check the game path in WWA settings.")
+            return False
+
+        command = [game_path]
+        if self.spec.launch_info and self.spec.launch_info.cmdline:
+            command.extend(self.spec.launch_info.cmdline[1:])
+        logger.info("Starting the game client: %s", game_path)
         try:
-            if hwnd_util.get_hwnd(self.spec.game_path, force=True):
-                return True
-
-            logger.info("Starting the game now")
-            popen_args = [self.spec.game_path]
-            if self.spec.launch_info.cmdline and len(self.spec.launch_info.cmdline) > 1:
-                popen_args.extend(self.spec.launch_info.cmdline[1:])
-            logger.debug(f"subprocess: {popen_args}")
-
             subprocess.Popen(
-                popen_args,
-                creationflags=subprocess.DETACHED_PROCESS
+                command,
+                cwd=Path(game_path).parent,
+                creationflags=subprocess.DETACHED_PROCESS,
             )
+        except OSError:
+            logger.exception("Could not start the game client: %s", game_path)
+            return False
 
-            self._sleep(20)
-            for i in range(10):
-                try:
-                    hwnd = hwnd_util.get_hwnd(self.spec.game_path, force=True)
-                    if hwnd:
-                        logger.info("The game has restarted")
-                        self._sleep(10)
-                        return True
-                except KeyboardInterrupt:
-                    logger.warning("KeyboardInterrupt")
-                    raise
-                except StopError:
-                    raise
-                except Exception as e2:
-                    logger.exception(e2)
-                self._sleep(5)
-        except Exception as e:
-            logger.exception(e)
+        deadline = time.monotonic() + 120
+        while time.monotonic() < deadline:
+            self._sleep(2)
+            if hwnd_util.get_hwnd(game_path, force=True):
+                self._sleep(10)
+                logger.info("Game client window is ready")
+                return True
+        logger.error("Timed out waiting for the game client window: %s", game_path)
         return False
 
 
@@ -666,14 +667,19 @@ def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
                 return
 
         if cfg.startGame:
-            res = PrepareTask(event, spec, ipc, **kwargs).start_game()
-            if not res:
-                logger.warning(f"Failed to start the game")
+            try:
+                ready = (PrepareTask(event, spec, ipc, **kwargs).start_game()
+                         and ctx.window_service.refresh())
+            except StopError:
+                logger.info("Daily task stopped during game startup")
+                return
+            except Exception:
+                logger.exception("Error while preparing the game window for dailies")
+                ready = False
+            if not ready:
+                logger.error("Daily task could not connect to the game client window")
                 _report_daily_result(ctx, False)
                 return
-
-            # 刷新游戏窗口句柄
-            ctx.window_service.refresh()
 
         # 1. 先获取当前鼠标位置
         original_x, original_y = keymouse_util.get_mouse_position()

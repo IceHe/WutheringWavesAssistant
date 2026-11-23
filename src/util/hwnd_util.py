@@ -183,26 +183,44 @@ def filter_hwnds(hwnds: list, filter_path: str):
     return None
 
 
-def get_wwg_path(path_str: str) -> Path | None:
+def get_wwg_path(path_str: str | Path | None) -> Path | None:
     """ 获取Wuthering Waves Game目录绝对路径 """
     if not path_str:
         return None
     try:
-        if isinstance(path_str, Path):
-            path_str = str(path_str.resolve())
+        path = Path(path_str)
         # 兼容Wuthering Waves.exe 和 Client-Win64-Shipping.exe
-        if path_str.endswith(WUTHERING_WAVES_EXE):
-            return Path(path_str).parent
-        if path_str.endswith(CLIENT_WIN64_SHIPPING_EXE):
-            return Path(path_str).parent.parent.parent.parent
+        if path.name.casefold() == WUTHERING_WAVES_EXE.casefold():
+            return path.parent
+        if path.name.casefold() == CLIENT_WIN64_SHIPPING_EXE.casefold():
+            return path.parent.parent.parent.parent
     except Exception as e:
         logger.exception(e)
     return None
 
 
-def get_ww_exe_path(path_str: str) -> str:
-    ww_exe_path = get_wwg_path(path_str)
-    return str(ww_exe_path.joinpath(WUTHERING_WAVES_EXE).resolve())
+def get_ww_exe_path(path_str: str | Path | None) -> str | None:
+    """Resolve an installed game entry point from a client, launcher, or install directory."""
+    if not path_str:
+        return None
+    path = Path(path_str)
+    try:
+        if game_dir := get_wwg_path(path):
+            candidates = (game_dir,)
+        else:
+            if path.name.casefold() == LAUNCHER_EXE:
+                path = path.parent
+            elif not path.is_dir():
+                return None
+            candidates = (path / "Wuthering Waves Game", path)
+        for directory in candidates:
+            executable = directory / WUTHERING_WAVES_EXE
+            client = directory / "Client" / "Binaries" / "Win64" / CLIENT_WIN64_SHIPPING_EXE
+            if executable.is_file() and client.is_file():
+                return str(executable.resolve())
+    except (OSError, RuntimeError, ValueError):
+        logger.debug("Could not resolve game executable under %s", path, exc_info=True)
+    return None
 
 
 def get_child_hwnds(hwnd):

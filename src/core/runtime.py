@@ -8,7 +8,7 @@ from src.config.config import (Config, BossConfig, DailyConfig, GameConfig, Soar
                                ControlsConfig)
 from src.core.enemy import EnemyGroup
 from src.core.i18n import I18nText, Language
-from src.util import winreg_util
+from src.util import hwnd_util, winreg_util
 
 logger = logging.getLogger(__name__)
 
@@ -260,28 +260,13 @@ class GameRuntimeConfig:
 
     @cached_property
     def gamePath(self) -> Path | None:
-        gamePath = self._cfg.gamePath
-        if gamePath and gamePath != "Auto":
-            try:
-                path = Path(gamePath)
-                if path.is_file():
-                    logger.debug(f"Using game path: '{path}'")
-                    return path
-            except Exception:
-                pass
-            logger.warning(f"Invalid game path: '{gamePath}'")
-
-        gamePath = winreg_util.get_install_path()
-        if gamePath:
-            try:
-                path = Path(gamePath)
-                if path.is_file():
-                    logger.debug(f"Using game path: '{path}'")
-                    return path
-            except Exception:
-                pass
-        logger.warning(f"Invalid game path: '{gamePath}'")
-        return None
+        configured_path = self._cfg.gamePath
+        if configured_path and configured_path != "Auto":
+            if executable := hwnd_util.get_ww_exe_path(configured_path):
+                return Path(executable)
+            logger.warning("No game client found at the configured path: %s", configured_path)
+        executable = winreg_util.get_install_path()
+        return Path(executable) if executable else None
 
     @cached_property
     def device(self) -> Device:
