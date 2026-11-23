@@ -29,6 +29,8 @@ _VERIFICATION_TEXT = r"请输入(?:短信)?验证码|安全验证|請輸入驗�
 _RETURN_ACTION = (r"返回\s*(?:至\s*)?(?:登\s*[录錄入]|标题|標題)(?:界面|畫面)?|"
                   r"return\s+to\s+(?:the\s+)?(?:log\s*in|title)(?:\s+screen)?")
 _QUIT_GAME = r"退出\s*(?:游戏|遊戲)|(?:exit|quit)\s+(?:the\s+)?game"
+_LOGOUT_PROMPT = r"^\s*[确確]\s*[认認]\s*登\s*出\s*[账帳]\s*[号號]\s*[?？]?\s*$"
+_LOGOUT_CONFIRM = r"^\s*[确確]\s*[认認]\s*登\s*出\s*$"
 
 
 def _suffix(label, *, ocr=False, configured=()):
@@ -149,6 +151,19 @@ class SavedAccountSwitcher:
                 return confirms[0]
         return None
 
+    def _handle_logout_dialog(self, frame, ocr):
+        height, width = frame.shape[:2]
+        body = BBox(int(width * 0.23), int(height * 0.34), int(width * 0.77), int(height * 0.55))
+        if not ocr.search(_LOGOUT_PROMPT, body):
+            return False
+
+        right = BBox(width // 2, body.y2, int(width * 0.80), int(height * 0.76))
+        buttons = ocr.search(_LOGOUT_CONFIRM, right) or []
+        if len(buttons) == 1:
+            self.ui.click_bbox(buttons[0], delay=0.2).sleep(0.8)
+            logger.info("Confirmed logout before opening saved accounts")
+        return True
+
     def _open_panel(self):
         if panel := self._read_panel():
             return panel
@@ -159,6 +174,8 @@ class SavedAccountSwitcher:
             ocr = self.ctx.ocr_service.query(frame)
             if self._handle_account_disconnect(frame, ocr):
                 return None
+            if self._handle_logout_dialog(frame, ocr):
+                return "title", None
             if button := self._return_login_button(frame, ocr):
                 return "return_dialog", button
             if self.pages.handle_login_rewards(ui=self.ui, frame=frame, ocr=ocr):
@@ -199,30 +216,26 @@ class SavedAccountSwitcher:
             self.ui.click_bbox(target)
             logger.info("Clicked Return to Login in the game exit dialog")
 
-        def panel_or_title_action():
+        title_clicked = False
+
+        def open_saved_accounts():
+            nonlocal title_clicked
             if panel := self._read_panel():
-                return panel, None
+                return panel
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
-            if self._handle_account_disconnect(frame, ocr):
-                return None
-            if self._is_title(ocr):
-                if buttons := ocr.search(self.ctx.tr(I18nText.Account)):
-                    return None, buttons[0].center
-                if point := _switch_account_point(frame):
-                    return None, point
-                if buttons := ocr.search(self.ctx.tr(I18nText.Login)):
-                    return None, buttons[0].center
+            if self._handle_account_disconnect(frame, ocr) or self._handle_logout_dialog(frame, ocr):
+                title_clicked = False
+            elif not title_clicked and self._is_title(ocr):
+                buttons = ocr.search(self.ctx.tr(I18nText.Login)) or ocr.search(self.ctx.tr(I18nText.Account))
+                point = buttons[0].center if buttons else _switch_account_point(frame)
+                if point is not None:
+                    self.ui.click_point(point).sleep(1)
+                    title_clicked = True
             return None
 
-        result = self.ui.sleep(1).wait(45, 0.75).until(panel_or_title_action)
-        if result:
-            panel, point = result
-            if point is not None:
-                self.ui.click_point(point)
-                panel = self.ui.sleep(1).wait(20, 0.75).until(self._read_panel)
-            if panel:
-                return panel
+        if panel := self.ui.sleep(1).wait(45, 0.75).until(open_saved_accounts):
+            return panel
         raise RuntimeError("Saved-account list not found; check whether the game requires manual verification")
 
     def _is_title(self, ocr):
@@ -341,7 +354,7 @@ class SavedAccountSwitcher:
         def login_ready():
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
-            if self._handle_account_disconnect(frame, ocr):
+            if self._handle_account_disconnect(frame, ocr) or self._handle_logout_dialog(frame, ocr):
                 return False
             return self._is_title(ocr) or self._read_panel(frame) is not None
 

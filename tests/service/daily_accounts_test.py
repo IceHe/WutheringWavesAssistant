@@ -122,6 +122,9 @@ class ReturnToLoginTest(unittest.TestCase):
         self.login = TextBox(1000, 550, 1110, 580, "返回登录", 1)
         self.prompt = TextBox(685, 416, 907, 449, "是否确定退出游戏？", 1)
         self.exit_dialog = OcrResult([self.quit, self.login, self.prompt])
+        self.logout_prompt = TextBox(708, 422, 871, 445, "确认登出账号？", 1)
+        self.logout_confirm = TextBox(1001, 553, 1099, 577, "确认登出", 1)
+        self.logout_dialog = OcrResult([self.logout_prompt, self.logout_confirm])
 
     def test_terminal_clicks_power_then_return_to_login(self):
         terminal = OcrResult([TextBox(20, 50, 120, 78, self.ctx.tr(key).raw, 1) for key in (
@@ -164,6 +167,51 @@ class ReturnToLoginTest(unittest.TestCase):
 
     def test_ignores_an_isolated_login_label(self):
         self.assertIsNone(self.switcher._return_login_button(self.frame, OcrResult([self.login])))
+
+    def test_resumes_when_logout_confirmation_is_already_open(self):
+        self.ctx.ocr_service.query.return_value = self.logout_dialog
+
+        self.assertIs(self.switcher._open_panel(), self.panel)
+
+        self.ui.click_bbox.assert_called_once_with(self.logout_confirm, delay=0.2)
+        self.ui.esc.assert_not_called()
+
+    def test_confirms_logout_then_opens_login_and_selects_the_configured_account(self):
+        settings = TextBox(1480, 550, 1550, 580, "设置", 1)
+        account = TextBox(1480, 430, 1550, 460, "账号", 1)
+        login = TextBox(765, 830, 830, 860, "登入", 1)
+        title = OcrResult([settings, account])
+        self.ctx.ocr_service.query.side_effect = [title, title, self.logout_dialog, OcrResult([settings, account, login])]
+        submit = TextBox(100, 290, 140, 320, "登录", 1)
+        current = TextBox(80, 80, 160, 100, "188****1001", 1)
+        target = TextBox(80, 140, 160, 160, "188****1002", 1)
+        self.switcher._read_panel.side_effect = [
+            None, None, None, None,
+            _AccountPanel(42, submit, (current,)),
+            _AccountPanel(42, None, (current, target)),
+            _AccountPanel(42, submit, (target,)),
+        ]
+        self.ui.wait.return_value.until.side_effect = lambda read: read() or read() or read() or read()
+        self.switcher._click = self.ui.saved_account_click
+
+        with patch.object(self.switcher, "_enter_world", return_value=True):
+            self.switcher.enter("1002")
+
+        click_names = {"click_point", "click_bbox", "saved_account_click"}
+        self.assertEqual([action for action in self.ui.mock_calls if action[0] in click_names], [
+            call.click_point(account.center),
+            call.click_bbox(self.logout_confirm, delay=0.2),
+            call.click_point(login.center),
+            call.saved_account_click(42, current.center),
+            call.saved_account_click(42, target.center),
+            call.saved_account_click(42, submit.center),
+        ])
+
+    def test_logout_requires_prompt_and_dedicated_button(self):
+        generic = TextBox(1020, 553, 1077, 576, "确认", 1)
+        self.assertFalse(self.switcher._handle_logout_dialog(self.frame, OcrResult([self.logout_confirm])))
+        self.assertTrue(self.switcher._handle_logout_dialog(self.frame, OcrResult([self.logout_prompt, generic])))
+        self.ui.click_bbox.assert_not_called()
 
     def test_account_disconnect_confirms_then_waits_for_title_screen(self):
         dialog = disconnect_dialog()
