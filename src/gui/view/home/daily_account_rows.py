@@ -46,6 +46,7 @@ class _AccountRow(QWidget):
     def __init__(self, parent):
         super().__init__(parent)
         self.handle = _DragHandle(self)
+        self.enabled_checkbox = CheckBox(parent=self)
         self.suffix = LineEdit(self)
         self.suffix.setFixedWidth(116)
         self.dungeon = ComboBox(self)
@@ -55,6 +56,7 @@ class _AccountRow(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.handle)
+        layout.addWidget(self.enabled_checkbox)
         layout.addWidget(self.suffix)
         layout.addWidget(self.dungeon, 1)
         layout.addWidget(self.nests)
@@ -126,10 +128,14 @@ class DailyAccountRows(QWidget):
     def _rows(self):
         return [self.rows_layout.itemAt(index).widget() for index in range(self.rows_layout.count())]
 
-    def _add_row(self, suffix="", dungeon=None, nests=None):
+    def _add_row(self, suffix="", dungeon=None, nests=None, *, enabled=True):
         row = _AccountRow(self)
         row.handle.setAccessibleName(self.tr("Drag to reorder account"))
         row.handle.setToolTip(self.tr("Drag to reorder account"))
+        enabled_label = self.tr("Run dailies for this account")
+        row.enabled_checkbox.setAccessibleName(enabled_label)
+        row.enabled_checkbox.setToolTip(enabled_label)
+        row.enabled_checkbox.setChecked(enabled)
         row.suffix.setAccessibleName(self.tr("Account suffix"))
         row.suffix.setPlaceholderText(self.tr("Account suffix"))
         row.dungeon.setAccessibleName(self.tr("Account Tacet Field"))
@@ -149,6 +155,7 @@ class DailyAccountRows(QWidget):
                 index = row.dungeon.count() - 1
             row.dungeon.setCurrentIndex(index)
         row.suffix.textChanged.connect(self.changed)
+        row.enabled_checkbox.toggled.connect(self.changed)
         row.dungeon.currentIndexChanged.connect(self.changed)
         row.remove.clicked.connect(lambda: self._remove_row(row))
         self.rows_layout.addWidget(row)
@@ -186,15 +193,17 @@ class DailyAccountRows(QWidget):
         row.deleteLater()
         self.changed.emit()
 
-    def restore(self, suffix_text, dungeons, nests):
+    def restore(self, suffix_text, dungeons, nests, disabled_suffixes):
         dungeons = {suffix.upper(): dungeon for suffix, dungeon in dungeons.items()}
         nests = {suffix.upper(): selection for suffix, selection in nests.items()}
+        disabled_suffixes = {normalize_daily_account_suffix(suffix) for suffix in disabled_suffixes}
         for row in self._rows():
             self.rows_layout.removeWidget(row)
             row.hide()
             row.deleteLater()
         for suffix in split_daily_account_suffixes(suffix_text):
-            self._add_row(suffix, dungeons.get(suffix.upper()), nests.get(suffix.upper()))
+            key = suffix.upper()
+            self._add_row(suffix, dungeons.get(key), nests.get(key), enabled=key not in disabled_suffixes)
         if not self.rows_layout.count():
             self._add_row()
 
@@ -202,9 +211,11 @@ class DailyAccountRows(QWidget):
         suffixes = []
         overrides = {}
         nest_overrides = {}
+        disabled_suffixes = []
         for index, row in enumerate(self._rows(), 1):
             text = row.suffix.text().strip()
             dungeon = row.dungeon.currentData()
+            enabled = row.enabled_checkbox.isChecked()
             if not text and dungeon is None and row.nest_selection is None:
                 continue
             if not text:
@@ -216,15 +227,17 @@ class DailyAccountRows(QWidget):
             if suffix in suffixes:
                 raise ValueError(self.tr("Account suffix {suffix} is already listed.").format(suffix=suffix))
             if dungeon is not None:
-                if not any(item.id == dungeon for item in self._dungeons):
+                if enabled and not any(item.id == dungeon for item in self._dungeons):
                     raise ValueError(self.tr("Choose a valid Tacet Field on row {row}.").format(row=index))
                 overrides[suffix] = dungeon
             if row.nest_selection is not None:
                 nest_overrides[suffix] = row.nest_selection
             suffixes.append(suffix)
-        if require_minimum and len(suffixes) < 2:
-            raise ValueError(self.tr("Enter at least two different account suffixes."))
-        return ", ".join(suffixes), overrides, nest_overrides
+            if not enabled:
+                disabled_suffixes.append(suffix)
+        if require_minimum and len(suffixes) == len(disabled_suffixes):
+            raise ValueError(self.tr("Select at least one account for dailies."))
+        return ", ".join(suffixes), overrides, nest_overrides, disabled_suffixes
 
     def _dragged_row(self, event):
         handle = event.source()

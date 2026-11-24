@@ -608,11 +608,11 @@ def _report_daily_result(ctx, succeeded):
     time.sleep(0.1)
 
 
-def _run_daily_accounts(ctx, suffixes):
+def _run_daily_accounts(ctx, suffixes, *, configured_suffixes=None):
     from src.service.daily_workflow import DailyWorkflow
     from src.service.saved_accounts import SavedAccountLoginTimeout, SavedAccountSwitcher
 
-    switcher = SavedAccountSwitcher(ctx, suffixes)
+    switcher = SavedAccountSwitcher(ctx, configured_suffixes if configured_suffixes is not None else suffixes)
     failed = []
     for index, suffix in enumerate(suffixes, 1):
         if not ctx.runtime.stop_event.is_set():
@@ -662,7 +662,11 @@ def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
         suffixes = ()
         if cfg.multiAccount:
             try:
-                suffixes = parse_daily_account_suffixes(cfg.accountSuffixes)
+                configured_suffixes = parse_daily_account_suffixes(cfg.accountSuffixes)
+                suffixes = tuple(suffix for suffix in configured_suffixes
+                                 if suffix not in cfg.accountDisabledSuffixes)
+                if not suffixes:
+                    raise ValueError("Select at least one account for dailies.")
                 for suffix in suffixes:
                     dungeon_id = cfg.accountTacetSuppression.get(suffix)
                     if dungeon_id is not None and dungeon_id not in Dungeon.TacetSuppression:
@@ -715,7 +719,7 @@ def daily_task(event, spec: TaskSpec, ipc: IPCManager, **kwargs):
 
         try:
             if suffixes:
-                _report_daily_result(ctx, _run_daily_accounts(ctx, suffixes))
+                _report_daily_result(ctx, _run_daily_accounts(ctx, suffixes, configured_suffixes=configured_suffixes))
             else:
                 from src.service.daily_workflow import DailyWorkflow
 

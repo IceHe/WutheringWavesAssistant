@@ -1974,7 +1974,8 @@ class DailyWidget(ScrollArea):
         self.multiAccountCheckBox.setChecked(paramConfig.get(paramConfig.dailyMultiAccount))
         self.dailyAccountRows.restore(paramConfig.get(paramConfig.dailyAccountSuffixes),
                                       paramConfig.get(paramConfig.dailyAccountTacetSuppression),
-                                      paramConfig.get(paramConfig.dailyAccountTacetDiscordNest))
+                                      paramConfig.get(paramConfig.dailyAccountTacetDiscordNest),
+                                      paramConfig.get(paramConfig.dailyAccountDisabledSuffixes))
         self.dailyAccountRows.setVisible(self.multiAccountCheckBox.isChecked())
         self.__updateTacetWaypointEnabled()
 
@@ -2019,7 +2020,7 @@ class DailyWidget(ScrollArea):
 
     def saveDailyAccounts(self, *, require_minimum=False):
         items = (paramConfig.dailyAccountSuffixes, paramConfig.dailyAccountTacetSuppression,
-                 paramConfig.dailyAccountTacetDiscordNest)
+                 paramConfig.dailyAccountTacetDiscordNest, paramConfig.dailyAccountDisabledSuffixes)
         values = self.dailyAccountRows.configuration(require_minimum=require_minimum)
         if values == tuple(paramConfig.get(item) for item in items):
             return
@@ -2069,7 +2070,7 @@ class DailyWidget(ScrollArea):
         self.dailyScheduleCheckBox.setChecked(False)
         self.dailyScheduleTimeEdit.setTime(QTime.fromString(DEFAULT_DAILY_SCHEDULE_TIME, "HH:mm"))
         self.multiAccountCheckBox.setChecked(False)
-        self.dailyAccountRows.restore("", {}, {})
+        self.dailyAccountRows.restore("", {}, {}, [])
         self.saveDailyAccounts()
 
     def __onCheckboxGroupChanged(self, cb, idx, checked):

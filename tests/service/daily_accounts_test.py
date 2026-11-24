@@ -290,13 +290,15 @@ class DailyAccountRotationTest(unittest.TestCase):
         self.ctx = NodeContext(ipc=Mock())
         self.ctx.runtime.stop_event = self.stop_event
         self.ctx.runtime.send = Mock()
-        self.switcher = self.enterContext(patch("src.service.saved_accounts.SavedAccountSwitcher")).return_value
+        self.switcher_type = self.enterContext(patch("src.service.saved_accounts.SavedAccountSwitcher"))
+        self.switcher = self.switcher_type.return_value
         self.create_workflow = self.enterContext(patch("src.service.daily_workflow.DailyWorkflow"))
         self.release = self.enterContext(patch("src.core.tasks.release_press_key"))
 
     def test_rotation_resets_daily_state_and_reports_once_at_end(self):
         self.ctx.spec = TaskSpec(user_config=Config.from_dict({"Daily": {
-            "MultiAccount": True, "AccountSuffixes": "1001，1002", "StartGame": False,
+            "MultiAccount": True, "AccountSuffixes": "1001，ABCD、1002", "StartGame": False,
+            "AccountDisabledSuffixes": ["ａｂｃｄ"], "AccountTacetSuppression": {"ABCD": "PreviousTacetField"},
         }}).to_dict())
         self.ctx.runtime.cfg = RuntimeConfig(self.ctx.spec.user_config)
         self.enterContext(patch.object(tasks, "task_init", return_value=(self.ctx, Mock())))
@@ -323,6 +325,7 @@ class DailyAccountRotationTest(unittest.TestCase):
 
         self.create_workflow.side_effect = create
         tasks.daily_task(self.stop_event, self.ctx.spec, self.ctx.ipc)
+        self.switcher_type.assert_called_once_with(self.ctx, ("1001", "ABCD", "1002"))
         self.assertEqual(self.switcher.enter.call_args_list, [call("1001"), call("1002")])
         self.assertEqual(len(states), 2)
         self.assertIsNot(states[0], states[1])
@@ -331,6 +334,20 @@ class DailyAccountRotationTest(unittest.TestCase):
             call(MsgType.TASK_STATUS, status=MsgTaskStatus.RUNNING),
             call(MsgType.TASK_STATUS, status=MsgTaskStatus.SUCCESS),
         ])
+
+    def test_no_enabled_accounts_fails_before_launching_or_running_dailies(self):
+        spec = TaskSpec(user_config=Config.from_dict({"Daily": {
+            "MultiAccount": True, "AccountSuffixes": "1001", "AccountDisabledSuffixes": ["1001"],
+        }}).to_dict())
+        self.ctx.runtime.cfg = RuntimeConfig(spec.user_config)
+        with (patch.object(tasks, "task_init", return_value=(self.ctx, Mock())),
+              patch.object(tasks, "PrepareTask") as prepare,
+              self.assertLogs("src.core.tasks", "ERROR")):
+            tasks.daily_task(self.stop_event, spec, self.ctx.ipc)
+        prepare.assert_not_called()
+        self.switcher_type.assert_not_called()
+        self.create_workflow.assert_not_called()
+        self.ctx.ipc.event_queue.put.assert_called_once_with({"task": {"DailyTask": "failed"}}, block=True)
 
     def test_normal_daily_failure_does_not_skip_the_next_verified_account(self):
         self.create_workflow.side_effect = [Mock(execute=lambda: False), Mock(execute=lambda: True)]
@@ -444,9 +461,10 @@ class DailyAccountConfigTest(unittest.TestCase):
 
     def test_config_preserves_order_and_leading_zero(self):
         self.assertEqual(parse_daily_account_suffixes("1002， 0001、a12ｂ,abcd"), ("1002", "0001", "A12B", "ABCD"))
+        self.assertEqual(parse_daily_account_suffixes("0001"), ("0001",))
 
     def test_duplicate_or_malformed_suffixes_are_rejected(self):
-        for value in ("", "1001", "1001,1001", "a12b,A12B", "1001,10102", "1001,ab-c"):
+        for value in ("", "1001,1001", "a12b,A12B", "1001,10102", "1001,ab-c"):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 parse_daily_account_suffixes(value)
 

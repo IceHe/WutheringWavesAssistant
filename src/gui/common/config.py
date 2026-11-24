@@ -210,6 +210,7 @@ class ParamConfig(QConfig):
     focusResonator = ConfigItem("Daily", "FocusResonator", None)
     dailyMultiAccount = ConfigItem("Daily", "MultiAccount", False, BoolValidator())
     dailyAccountSuffixes = ConfigItem("Daily", "AccountSuffixes", "")
+    dailyAccountDisabledSuffixes = ConfigItem("Daily", "AccountDisabledSuffixes", [])
     dailyAccountTacetSuppression = ConfigItem("Daily", "AccountTacetSuppression", {})
     dailyAccountTacetDiscordNest = ConfigItem("Daily", "AccountTacetDiscordNest", {})
 

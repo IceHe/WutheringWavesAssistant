@@ -114,8 +114,14 @@ class DailyConfig(ConfigBase):
     startGame: bool | None = None
     multiAccount: bool = False
     accountSuffixes: str = ""
+    accountDisabledSuffixes: list[str] = Field(default_factory=list)
     accountTacetSuppression: dict[str, str] = Field(default_factory=dict)
     accountTacetDiscordNest: dict[str, TacetNestSelection] = Field(default_factory=dict)
+
+    @field_validator("accountDisabledSuffixes")
+    @classmethod
+    def normalize_disabled_suffixes(cls, suffixes: list[str]) -> list[str]:
+        return list(dict.fromkeys(normalize_daily_account_suffix(suffix) for suffix in suffixes))
 
     @field_validator("accountTacetSuppression", "accountTacetDiscordNest")
     @classmethod
@@ -143,8 +149,10 @@ def normalize_daily_account_suffix(value: str) -> str:
 
 def parse_daily_account_suffixes(value: str) -> tuple[str, ...]:
     suffixes = tuple(normalize_daily_account_suffix(part) for part in split_daily_account_suffixes(value))
-    if len(suffixes) < 2 or len(set(suffixes)) != len(suffixes):
-        raise ValueError("Enter at least two different account suffixes.")
+    if not suffixes:
+        raise ValueError("Select at least one account for dailies.")
+    if len(set(suffixes)) != len(suffixes):
+        raise ValueError("Each account suffix may only be listed once.")
     return suffixes
 
 

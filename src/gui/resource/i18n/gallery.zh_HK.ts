@@ -515,6 +515,10 @@
         <translation>拖動調整帳號順序</translation>
     </message>
     <message>
+        <source>Run dailies for this account</source>
+        <translation>為此帳號執行日常</translation>
+    </message>
+    <message>
         <source>Account suffix</source>
         <translation>帳號尾碼</translation>
     </message>
@@ -547,8 +551,8 @@
         <translation>請為第 {row} 列選擇有效的無音區。</translation>
     </message>
     <message>
-        <source>Enter at least two different account suffixes.</source>
-        <translation>請輸入至少兩個不同的帳號尾碼。</translation>
+        <source>Select at least one account for dailies.</source>
+        <translation>請至少勾選一個帳號。</translation>
     </message>
 </context>
 <context>

@@ -89,6 +89,7 @@ class DailyRuntimeConfig:
         self.startGame: bool = cfg.startGame is None or bool(cfg.startGame)
         self.multiAccount = cfg.multiAccount
         self.accountSuffixes = cfg.accountSuffixes
+        self.accountDisabledSuffixes = frozenset(cfg.accountDisabledSuffixes)
         self.accountTacetSuppression = cfg.accountTacetSuppression
         self.accountTacetDiscordNest = cfg.accountTacetDiscordNest
 

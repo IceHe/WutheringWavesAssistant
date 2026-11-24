@@ -26,7 +26,8 @@ class DailyAccountRowsTest(unittest.TestCase):
         self.addCleanup(app.removeTranslator, translator)
 
         items = (paramConfig.dailyMultiAccount, paramConfig.dailyAccountSuffixes,
-                 paramConfig.dailyAccountTacetSuppression, paramConfig.dailyAccountTacetDiscordNest)
+                 paramConfig.dailyAccountTacetSuppression, paramConfig.dailyAccountTacetDiscordNest,
+                 paramConfig.dailyAccountDisabledSuffixes)
         original = [paramConfig.get(item) for item in items]
         for item, value in zip(items, original):
             self.addCleanup(paramConfig.set, item, value, False)
@@ -34,7 +35,7 @@ class DailyAccountRowsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "param-config.json"
             with patch.object(paramConfig._cfg, "file", path):
-                for item, value in zip(items, (False, "6663, 9892", {}, {})):
+                for item, value in zip(items, (False, "6663, 9892", {}, {}, [])):
                     paramConfig.set(item, value, save=False)
                 widget = DailyWidget()
                 self.addCleanup(widget.close)
@@ -47,7 +48,9 @@ class DailyAccountRowsTest(unittest.TestCase):
                 first, second = rows._rows()
                 self.assertEqual(first.dungeon.currentText(), "沿用全局")
                 self.assertEqual(first.nests.text(), "聚落：沿用全局")
-                self.assertEqual(rows.configuration(require_minimum=True), ("6663, 9892", {}, {}))
+                self.assertTrue(first.enabled_checkbox.isChecked())
+                self.assertTrue(second.enabled_checkbox.isChecked())
+                self.assertEqual(rows.configuration(require_minimum=True), ("6663, 9892", {}, {}, []))
 
                 stillness, flames = I18nText.TacetFieldHeartOfStillness, I18nText.TacetFieldHeartOfFlames
                 first.dungeon.setCurrentIndex(first.dungeon.findData(stillness))
@@ -78,7 +81,10 @@ class DailyAccountRowsTest(unittest.TestCase):
                 edit_nests(second, lambda dialog: dialog.checks[stagnant].click())
                 edit_nests(third, lambda dialog: dialog.skip.click())
                 selected_nests = {"6663": "All", "9892": [simulacrum, stagnant], "917A": []}
+                second.enabled_checkbox.click()
                 app.processEvents()
+                self.assertLess(first.handle.geometry().right(), first.enabled_checkbox.geometry().left())
+                self.assertLess(first.enabled_checkbox.geometry().right(), first.suffix.geometry().left())
 
                 event = Mock(source=lambda: third.handle, position=lambda: QPointF(15, first.geometry().top()))
                 event.mimeData.return_value.hasFormat.return_value = True
@@ -106,13 +112,25 @@ class DailyAccountRowsTest(unittest.TestCase):
                 self.assertEqual(parse_daily_account_suffixes(snapshot.accountSuffixes), ("917A", "9892", "6663"))
                 self.assertEqual(snapshot.accountTacetSuppression, {"6663": stillness, "9892": flames})
                 self.assertEqual(snapshot.accountTacetDiscordNest, selected_nests)
+                self.assertEqual(snapshot.accountDisabledSuffixes, ["9892"])
                 self.assert_submission_order(path, snapshot)
                 paramConfig.load(path)
                 reopened = DailyWidget()
                 self.addCleanup(reopened.close)
                 editor = reopened.dailyAccountRows
                 self.assertEqual(editor.configuration(require_minimum=True),
-                                 ("917A, 9892, 6663", {"6663": stillness, "9892": flames}, selected_nests))
+                                 ("917A, 9892, 6663", {"6663": stillness, "9892": flames}, selected_nests, ["9892"]))
+                row, disabled, last = editor._rows()
+                self.assertFalse(disabled.enabled_checkbox.isChecked())
+                row.enabled_checkbox.click()
+                self.assertTrue(reopened.task.validate().success)
+                last.enabled_checkbox.click()
+                self.assertEqual(reopened.task.validate().message, "请至少勾选一个账号。")
+                disabled.enabled_checkbox.click()
+                self.assertTrue(reopened.task.validate().success)
+                row.enabled_checkbox.click()
+                last.enabled_checkbox.click()
+                self.assertEqual(Config.load(path).daily.accountDisabledSuffixes, [])
                 self.assertEqual([row.nests.text() for row in editor._rows()],
                                  ["聚落：跳过", "聚落：已选 2 个", "聚落：全选"])
                 edit_nests(editor._rows()[0], lambda dialog: dialog.inherit.click())
@@ -146,7 +164,8 @@ class DailyAccountRowsTest(unittest.TestCase):
             def start():
                 config = Config.from_dict(spec.user_config).daily
                 submissions.append((parse_daily_account_suffixes(config.accountSuffixes),
-                                    config.accountTacetSuppression, config.accountTacetDiscordNest))
+                                    config.accountTacetSuppression, config.accountTacetDiscordNest,
+                                    config.accountDisabledSuffixes))
                 event.clear()
 
             return Mock(start=start)
@@ -162,4 +181,4 @@ class DailyAccountRowsTest(unittest.TestCase):
             with patch.object(application, "before"), patch("sys.argv", ["main.py", "--task", "DailyTask"]):
                 application.run()
         self.assertEqual(submissions, [(("917A", "9892", "6663"), saved.accountTacetSuppression,
-                                        saved.accountTacetDiscordNest)] * 2)
+                                        saved.accountTacetDiscordNest, saved.accountDisabledSuffixes)] * 2)
