@@ -610,7 +610,7 @@ def _report_daily_result(ctx, succeeded):
 
 def _run_daily_accounts(ctx, suffixes):
     from src.service.daily_workflow import DailyWorkflow
-    from src.service.saved_accounts import SavedAccountSwitcher
+    from src.service.saved_accounts import SavedAccountLoginTimeout, SavedAccountSwitcher
 
     switcher = SavedAccountSwitcher(ctx, suffixes)
     failed = []
@@ -633,6 +633,12 @@ def _run_daily_accounts(ctx, suffixes):
             logger.warning("Account ending in %s logged in elsewhere, skipping its remaining dailies", suffix)
             failed.append(suffix)
             switcher.return_after_disconnect()
+            continue
+        except SavedAccountLoginTimeout as error:
+            if not ctx.runtime.stop_event.is_set():
+                raise StopError()
+            logger.warning("%s; skipping its dailies for this run", error)
+            failed.append(suffix)
             continue
         if not ctx.runtime.stop_event.is_set():
             raise StopError()

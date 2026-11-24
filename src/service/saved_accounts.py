@@ -3,6 +3,7 @@
 import ctypes
 import logging
 import re
+import time
 import unicodedata
 from dataclasses import dataclass
 from functools import lru_cache
@@ -93,6 +94,10 @@ class _AccountPanel:
     combo: int | None = None
 
 
+class SavedAccountLoginTimeout(RuntimeError):
+    """The verified saved account was submitted but the world did not load."""
+
+
 class SavedAccountSwitcher:
     def __init__(self, ctx, account_suffixes=()):
         self.ctx = ctx
@@ -119,8 +124,26 @@ class SavedAccountSwitcher:
         if not (confirmed := self.ui.wait(5, 0.5).until(verified_panel)):
             raise RuntimeError(f"Could not verify saved account ending in {suffix}")
         self._click(confirmed.hwnd, confirmed.login.center)
-        if not self.ui.sleep(2).wait(120, 0.75).until(self._enter_world):
-            raise RuntimeError(f"Account ending in {suffix} did not enter the game; check the game login screen")
+        logger.info("Verified and submitted login for account ending in %s", suffix)
+        recheck_at = time.monotonic() + 8
+        retried = False
+
+        def entered_world():
+            nonlocal recheck_at, retried
+            if self._enter_world():
+                return True
+            now = time.monotonic()
+            if not retried and now >= recheck_at:
+                recheck_at = now + 8
+                if current := verified_panel():
+                    logger.info("Saved login panel still open for account ending in %s; submitting once more", suffix)
+                    self._click(current.hwnd, current.login.center)
+                    retried = True
+            return False
+
+        if not self.ui.sleep(2).wait(120, 0.75).until(entered_world):
+            raise SavedAccountLoginTimeout(f"Account ending in {suffix} did not enter the game within 120 seconds")
+        logger.info("Entered the game after selecting account ending in %s", suffix)
 
     def _click(self, hwnd, point):
         self.ui.sleep(0.1)
@@ -172,7 +195,7 @@ class SavedAccountSwitcher:
         def terminal_or_title():
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
-            if self._handle_account_disconnect(frame, ocr):
+            if self._handle_disconnect_dialog(frame, ocr):
                 return None
             if self._handle_logout_dialog(frame, ocr):
                 return "title", None
@@ -202,7 +225,7 @@ class SavedAccountSwitcher:
             def read_return_dialog():
                 frame = self.ui.grap()
                 ocr = self.ctx.ocr_service.query(frame)
-                if self._handle_account_disconnect(frame, ocr):
+                if self._handle_disconnect_dialog(frame, ocr):
                     return "disconnected", None
                 if button := self._return_login_button(frame, ocr):
                     return "return_dialog", button
@@ -224,7 +247,7 @@ class SavedAccountSwitcher:
                 return panel
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
-            if self._handle_account_disconnect(frame, ocr) or self._handle_logout_dialog(frame, ocr):
+            if self._handle_disconnect_dialog(frame, ocr) or self._handle_logout_dialog(frame, ocr):
                 title_clicked = False
             elif not title_clicked and self._is_title(ocr):
                 buttons = ocr.search(self.ctx.tr(I18nText.Login)) or ocr.search(self.ctx.tr(I18nText.Account))
@@ -339,6 +362,8 @@ class SavedAccountSwitcher:
         ocr = self.ctx.ocr_service.query(frame)
         if is_account_logged_in_elsewhere(self.ctx, ocr):
             raise AccountLoggedInElsewhere()
+        if self._handle_disconnect_dialog(frame, ocr):
+            return False
         if self.pages.handle_login_rewards(ui=self.ui, frame=frame, ocr=ocr):
             return False
         if self.ui.is_on_homepage(frame):
@@ -354,19 +379,22 @@ class SavedAccountSwitcher:
         def login_ready():
             frame = self.ui.grap()
             ocr = self.ctx.ocr_service.query(frame)
-            if self._handle_account_disconnect(frame, ocr) or self._handle_logout_dialog(frame, ocr):
+            if self._handle_disconnect_dialog(frame, ocr) or self._handle_logout_dialog(frame, ocr):
                 return False
             return self._is_title(ocr) or self._read_panel(frame) is not None
 
         if not self.ui.wait(30, 0.75).until(login_ready):
             raise RuntimeError("Could not return to login after the account was logged in elsewhere")
 
-    def _handle_account_disconnect(self, frame, ocr):
-        if not is_account_logged_in_elsewhere(self.ctx, ocr):
-            return False
+    def _handle_disconnect_dialog(self, frame, ocr):
         height, width = frame.shape[:2]
+        dialog = BBox(round(width * 0.20), round(height * 0.25), round(width * 0.80), height // 2)
+        messages = self.ctx.tr([I18nText.InternetDisconnecting, I18nText.RequestTimedOut])
+        if not ocr.search(messages, dialog):
+            return False
         buttons = BBox(width // 2, height // 2, round(width * 0.80), round(height * 0.75))
         confirm = ocr.search(self.ctx.tr(I18nText.Confirm), buttons)
         if confirm and len(confirm) == 1:
             self.ui.click_bbox(confirm[0], delay=0.2).sleep(0.8)
+            logger.info("Confirmed connection dialog while switching saved accounts")
         return True

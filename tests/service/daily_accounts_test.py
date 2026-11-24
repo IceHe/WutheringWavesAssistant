@@ -16,7 +16,7 @@ from src.core.runtime import RuntimeConfig
 from src.core.task import TaskFSM
 from src.core.workflow import NodeContext, TaskSpec
 from src.service.daily_workflow import endNode
-from src.service.saved_accounts import SavedAccountSwitcher, _AccountPanel, _suffix
+from src.service.saved_accounts import SavedAccountLoginTimeout, SavedAccountSwitcher, _AccountPanel, _suffix
 
 
 def disconnect_dialog(reason="账号在别处登录"):
@@ -92,6 +92,35 @@ class AccountSelectionTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "found 2"):
             self.switcher.enter("1002")
         self.switcher._click.assert_called_once_with(42, field.center)
+
+    def test_login_resubmits_at_most_once_if_the_verified_panel_remains(self):
+        panel = _AccountPanel(42, self.login, (self.row("1001", 80),))
+        self.switcher._open_panel = Mock(return_value=panel)
+        self.switcher._select_visible = Mock()
+        self.switcher._read_panel = Mock(side_effect=[panel, panel])
+        self.switcher._enter_world.side_effect = [False, False, False, True]
+        self.switcher.ui.wait.return_value.until.side_effect = lambda check: check() or check() or check() or check()
+
+        with patch("src.service.saved_accounts.time.monotonic", side_effect=[0, 3, 8, 16]):
+            self.switcher.enter("1001")
+
+        self.assertEqual(self.switcher._click.call_args_list, [call(42, self.login.center)] * 2)
+
+    def test_login_timeout_does_not_resubmit_a_different_account_or_window(self):
+        field = self.row("1001", 80)
+        panel = _AccountPanel(42, self.login, (field,))
+        self.switcher._open_panel = Mock(return_value=panel)
+        self.switcher._select_visible = Mock()
+        self.switcher._enter_world.return_value = False
+        for changed_panel in (_AccountPanel(42, self.login, (self.row("1002", 80),)),
+                              _AccountPanel(43, self.login, (field,)), None):
+            with self.subTest(changed_panel=changed_panel):
+                self.switcher._click.reset_mock()
+                self.switcher._read_panel = Mock(side_effect=[panel, changed_panel])
+                with (patch("src.service.saved_accounts.time.monotonic", side_effect=[0, 8]),
+                      self.assertRaises(SavedAccountLoginTimeout)):
+                    self.switcher.enter("1001")
+                self.switcher._click.assert_called_once_with(42, self.login.center)
 
     def test_saved_login_click_uses_child_client_coordinates(self):
         control = Mock()
@@ -233,6 +262,15 @@ class ReturnToLoginTest(unittest.TestCase):
             self.switcher._enter_world()
         self.ui.click_bbox.assert_not_called()
 
+    def test_connection_timeout_dialog_is_dismissed_during_login(self):
+        dialog = disconnect_dialog("网络连接超时")
+        self.ctx.ocr_service.query.return_value = dialog
+
+        self.assertFalse(self.switcher._enter_world())
+
+        self.ui.click_bbox.assert_called_once_with(dialog.results[-1], delay=0.2)
+        self.ui.is_on_homepage.assert_not_called()
+
     def test_kick_while_leaving_previous_account_still_opens_saved_accounts(self):
         terminal = OcrResult([TextBox(20, 50, 120, 78, self.ctx.tr(key).raw, 1) for key in (
             I18nText.Events, I18nText.SOL3Phase, I18nText.UnionLevel, I18nText.UnionEXP,
@@ -307,6 +345,19 @@ class DailyAccountRotationTest(unittest.TestCase):
             tasks._run_daily_accounts(self.ctx, ("1001", "1002"))
         self.switcher.enter.assert_called_once_with("1001")
         self.create_workflow.assert_not_called()
+
+    def test_login_timeout_skips_the_account_and_runs_later_dailies(self):
+        timeout = SavedAccountLoginTimeout("Account ending in 1002 did not enter the game within 120 seconds")
+        self.switcher.enter.side_effect = [None, timeout, None]
+        self.create_workflow.return_value.execute.return_value = True
+
+        with self.assertLogs("src.core.tasks", "WARNING") as logs:
+            self.assertFalse(tasks._run_daily_accounts(self.ctx, ("1001", "1002", "1003")))
+
+        self.assertEqual(self.switcher.enter.call_args_list, [call("1001"), call("1002"), call("1003")])
+        self.assertEqual(self.create_workflow.call_args_list,
+                         [call(self.ctx, account_suffix="1001"), call(self.ctx, account_suffix="1003")])
+        self.assertIn("Daily rotation finished with failures for: 1002", logs.output[-1])
 
     def test_kicked_account_stops_before_login_with_next_account(self):
         first, second = Mock(), Mock()
