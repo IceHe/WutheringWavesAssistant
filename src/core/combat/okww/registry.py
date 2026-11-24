@@ -27,6 +27,7 @@ from .characters.Jianxin import Jianxin
 from .characters.Jinhsi import Jinhsi
 from .characters.JingRan import JingRan
 from .characters.Jiyan import Jiyan
+from .characters.Lily import Lily
 from .characters.Lingyang import Lingyang
 from .characters.Linnai import Linnai
 from .characters.Lucilla import Lucilla
@@ -147,6 +148,8 @@ _char_dict_raw = {
     Labels.char_hsin: {'cls': Hsin, 'char_type': CharType.MAIN_DPS, 'ring_index': Elements.ELECTRIC},
     Labels.char_suoming: {'cls': Suoming, 'char_type': CharType.SUB_DPS, 'buff_time': 8,
                          'ring_index': Elements.ELECTRIC},
+    Labels.char_lily: {'cls': Lily, 'char_type': CharType.HEALER, 'buff_time': 30,
+                       'ring_index': Elements.SPECTRO},
 }
 
 char_dict = {}

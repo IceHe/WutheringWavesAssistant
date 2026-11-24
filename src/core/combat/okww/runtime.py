@@ -8,6 +8,7 @@ from src.core.combat.combat_core import BaseResonator
 from src.core.i18n import I18N_TEXT, Language
 
 from .characters.BaseChar import BaseChar
+from .characters.Lily import Lily
 from .inputs import CombatInput
 from .registry import char_dict
 from .rotation import NotInCombatException, Rotation
@@ -78,6 +79,7 @@ class CombatRuntime(Rotation, Vision, CombatInput):
         self.combat_start = 0.0
         self.in_liberation = False
         self.skip_combat_check = False
+        self._in_slumberland = False
         self.has_lavitator = False
         self.use_liberation = True
         self._last_break_check = 0.0
@@ -96,7 +98,22 @@ class CombatRuntime(Rotation, Vision, CombatInput):
         self.frame = frame[:, :, :3]
         self._last_frame = time.monotonic()
         self._team = None
+        self._update_slumberland()
         return self.frame
+
+    @property
+    def combat_check_suspended(self):
+        return self.in_liberation or self.skip_combat_check or self._in_slumberland
+
+    def _update_slumberland(self):
+        active = self.get_current_char()
+        was_in_slumberland = self._in_slumberland
+        self._in_slumberland = isinstance(active, Lily) and active.skip_combat_check()
+        if was_in_slumberland or self._in_slumberland:
+            # Give the party and target HUD their normal grace period after the handoff.
+            self._last_team = self._last_frame
+            if self._combat_seen:
+                self._combat_seen = self._last_frame
 
     def in_team(self):
         if self._team is None:
@@ -115,6 +132,8 @@ class CombatRuntime(Rotation, Vision, CombatInput):
 
     def _solo_hud(self):
         # The markers also disappear in menus and during Liberation.
+        if self._in_slumberland and len(self.chars) == 1:
+            return True
         if len(self.chars) > 1 or sum(bool(hint) for hint in self.hints) > 1 or self.in_liberation:
             return False
         return bool(self.has_target() and self.box_highlighted("resonance"))
@@ -148,6 +167,8 @@ class CombatRuntime(Rotation, Vision, CombatInput):
             logger.info("OKWW team: %s", ", ".join(str(char) for char in self.chars))
         for i, char in enumerate(self.chars):
             char.is_current_char = i == active
+        if self._in_slumberland or isinstance(self.chars[active], Lily):
+            self._update_slumberland()
         return True
 
     def _identify_slot(self, index):
@@ -188,6 +209,8 @@ class CombatRuntime(Rotation, Vision, CombatInput):
             return
         if fresh:
             self.next_frame()
+        if self._in_slumberland:
+            return
         now = time.monotonic()
         if not self.in_team()[0] and self._last_team and now - self._last_team > 1.5:
             self.raise_not_in_combat("Combat party HUD disappeared")

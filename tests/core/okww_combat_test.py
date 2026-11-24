@@ -38,7 +38,7 @@ class RecognitionTest(unittest.TestCase):
     def test_all_builtin_characters_and_portraits(self):
         runtime = runtime_for(replay())
         classes = {info["cls"]: info for info in char_dict.values()}
-        self.assertEqual(len(classes), 57)
+        self.assertEqual(len(classes), 58)
         for label in char_dict:
             with self.subTest(label=label):
                 self.assertIn(label, template_index())

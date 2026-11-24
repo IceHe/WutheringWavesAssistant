@@ -53,7 +53,7 @@ class OKWWCombatSystem:
 
     @property
     def combat_check_suspended(self):
-        return self._runtime.in_liberation or self._runtime.skip_combat_check
+        return self._runtime.combat_check_suspended
 
     def set_resonators(self, resonator_names_zh, is_print=True):
         hints = tuple(name if name and name.casefold() != "none" else None for name in resonator_names_zh)

@@ -16,15 +16,24 @@ class CombatInput:
         if seconds >= 0.1:
             self.check_combat()
 
-    def wait_until(self, condition, time_out=0, pre_action=None, post_action=None, raise_if_not_found=False):
+    def wait_until(self, condition, time_out=0, pre_action=None, post_action=None, raise_if_not_found=False,
+                   *, settle_time=0):
         deadline = time.monotonic() + (time_out if time_out > 0 else 10)
+        matched_since = None
         if pre_action is not None:
             pre_action()
         while True:
             self.next_frame()
-            if result := condition():
-                return result
-            if time.monotonic() >= deadline:
+            result = condition()
+            now = time.monotonic()
+            if result:
+                if matched_since is None:
+                    matched_since = now
+                if now - matched_since >= settle_time:
+                    return result
+            else:
+                matched_since = None
+            if now >= deadline:
                 break
             if post_action is not None:
                 post_action()
